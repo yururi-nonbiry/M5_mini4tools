@@ -1,4 +1,4 @@
-// インクルードファイル
+// include
 #include <M5StickC.h> // M5stick
 #include <Wire.h> // I2C
 #include <VL53L0X.h> //ToFセンサー
@@ -21,10 +21,10 @@ volatile unsigned long rap_time_start ; // スタート時間記録用
 volatile unsigned long rap_time_end ; // ストップ時間記録用
 volatile unsigned long rap_time ; // ラップタイム計算用
 
-//メインルーチン用
+// メインルーチンのメニューカウント用
 byte menu_count = 0 ;
 
-// EEPROMの構造体宣言
+// EEPROMの構造体
 struct set_data {
   char SBTDN[21] ; //serial bluetooth device name
   byte RT_WC ; // rap time waiting count
@@ -37,90 +37,89 @@ set_data set_data_buf; // 構造体宣言
 // EEPROMリセット
 void eeprom_reset() {
 
-  String str = "rap_timer" ;
-  str.toCharArray(set_data_buf.SBTDN, 10); // bluetoothデバイス名
+  String str = "rap_timer" ; // bluetoothデバイス名
+  str.toCharArray(set_data_buf.SBTDN, 10); 
   set_data_buf.RT_WC = 50 ; // rap time waiting count　Type:byte
   set_data_buf.RT_WD = 20 ; // rap time waiting distance(mm) Type:byte
   set_data_buf.RT_TD = 30 ; // rap time trig distance(mm) Type:byte
-  eeprom_write();
+  eeprom_write(); // EEPROM書き込み
 }
 
 // EEPROMへ書き込み
 void eeprom_write() {
-  EEPROM.put <set_data> (0, set_data_buf);
-  EEPROM.commit();
+  EEPROM.put <set_data> (0, set_data_buf); // EEPROMへの書き込み
+  EEPROM.commit(); // これが必要らしい
 }
 
 
-//起動時の表示
-void write_display()
-{
-  M5.Lcd.fillScreen(TFT_BLACK);
-  M5.Lcd.setCursor(0, 0);
-  M5.Lcd.print(F("ToF Sensor"));
-}
-
-//マルチタスク用のルーチン
+//マルチタスク　core0
 //距離センサ関係
 void sub_task(void* param) {
 
+  // ここから繰り返し
   while (1) {
 
-    time_count = millis();
+    time_count = millis(); // 1ループのタイム計測用
 
     if (sub_task_status == 0) { //何もしないモード
+      
       delay(100);
+      
     } else if (sub_task_status == 1) { //距離測定モード
 
       distance_read = sensor.readRangeContinuousMillimeters(); //距離測定
 
-      if (sensor.timeoutOccurred()) {
-        //M5.Lcd.printf(" TIMEOUT");
+      if (sensor.timeoutOccurred()) { //センサータイムアウト時の処理()
+        // ここの処理はしなくても大丈夫
       }
     } else if (sub_task_status == 2) { // ラップタイム用
+      
       rap_time_start = 0 ; // スタート時間初期化
       rap_time_end =  0 ; // ストップ時間初期化
-      int distance_average;
-      while (sub_task_status == 2) {
-        int distance_count[50];
-        int distance_max = 0 ;
-        int distance_min = 5000 ;
+      
+      int distance_average ; // 距離の平均値を入れる変数
+      
+      while (sub_task_status == 2) { // センサーの距離が安定するまで待つモード
+        int distance_count[255]; // 距離を格納するための変数
+        int distance_max = 0 ; // 最大値を初期化
+        int distance_min = 5000 ; // 最小値を初期化
         int distance_read ;
-        for (int count = 0; count < set_data_buf.RT_WC; count++) {
-          distance_read = sensor.readRangeContinuousMillimeters(); //距離測定
-          if ( distance_max < distance_read )distance_max = distance_read;
-          if ( distance_min > distance_read )distance_min = distance_read;
-          delay(1);
+        for (int count = 0; count < set_data_buf.RT_WC; count++) { // 距離を繰り返し測定する
+          distance_read = sensor.readRangeContinuousMillimeters(); // 距離測定
+          if ( distance_max < distance_read )distance_max = distance_read; // 最大値の更新
+          if ( distance_min > distance_read )distance_min = distance_read; // 最小値の更新
+          delay(10); // wdtリセット用
         }
 
         if (distance_max - distance_min < set_data_buf.RT_WD) { // 距離の変動が一定以下なら抜ける
-          distance_average = (distance_max + distance_min ) / 2;
-          sub_task_status = 3;
+          distance_average = (distance_max + distance_min ) / 2; //最大値と最小値の中心値を入れる(これが判定の基準値となる)
+          sub_task_status = 3; // ループを抜ける為、モードを3にする
         }
       }
-      while (sub_task_status == 3 ) {
-        if ( distance_average - sensor.readRangeContinuousMillimeters() > set_data_buf.RT_TD) {
-          rap_time_start = millis();
-          break;
+      
+      while (sub_task_status == 3 ) { // スタート待ち
+        if ( distance_average - sensor.readRangeContinuousMillimeters() > set_data_buf.RT_TD) { // 基準値から一定の距離近づいたらスタートする
+          rap_time_start = millis(); // スタートの時間を記録する
+          break; // whileを抜ける
         }
-        delay(1);
+        delay(1); // wdtリセット用
       }
-      delay(5000);
-      while (sub_task_status == 3) {
-        if (distance_average - sensor.readRangeContinuousMillimeters() > set_data_buf.RT_TD) {
-          rap_time_end = millis();
-          break;
+      delay(5000); // 即停止しないように待つ
+      while (sub_task_status == 3) { // ストップ待ち
+        if (distance_average - sensor.readRangeContinuousMillimeters() > set_data_buf.RT_TD) { // 基準値から一定の距離近づいたらストップする
+          rap_time_end = millis(); // ストップの時間を記録する
+          break; // whileを抜ける
         }
-        delay(1);
+        delay(1); // wdtリセット用
       }
     }
-    delay(10);
-    process_time = millis() - time_count ;
+    delay(10); // wdtリセット用
+    process_time = millis() - time_count ; // 1ループの時間計測
 
   }
 }
 
-//テスト用ルーチン
+//テスト用ルーチン(距離の測定とそれにかかる時間の確認用)
 void test() {
   sub_task_status = 1; // サブタスクをテスト用に設定
   M5.Lcd.fillScreen(BLACK);  // 画面をクリア
@@ -152,15 +151,15 @@ void test() {
   menu_lcd_draw(); // メニュー用のlcd表示
 }
 
-// セッティング用サブルーチン
+// セッティング用サブルーチン (bluetooth serialで設定値を受信するモード)
 void setting() {
 
   // 変数定義
   String read_serial = "";
 
-  setCpuFrequencyMhz(80); //周波数変更
+  setCpuFrequencyMhz(80); //周波数変更(低いと通信できない)
   delay(100);
-  SerialBT.begin("rap_time"); // bluetoothスタート
+  SerialBT.begin(set_data_buf.SBTDN); // bluetoothスタート
   SerialBT.setTimeout(100); // タイムアウトまでの時間を設定
 
   M5.Lcd.fillScreen(BLACK);  // 画面をクリア
@@ -170,19 +169,17 @@ void setting() {
 
   // ここから読取用のルーチン
   while (1) {
-    power_supply_draw(); // 電源の状態だけ更新する
+    power_supply_draw(); // 電源の状態を更新
 
     if (SerialBT.available() > 0) { //シリアルに文字が送られてきてるか
       read_serial = SerialBT.readStringUntil(';');
-      //SerialBT.print(F("Return:"));
-      //SerialBT.println(read_serial);
     }
     // スペースと改行を消す
-    int search_number = 0; // 文字検索用検索
+    int search_number = 0 ; // 文字検索用検索
     while (search_number != -1) { // 消したい文字が見つからなくなるまで繰り返す
-      search_number = read_serial.lastIndexOf(" "); // スペースを検索する
-      if (search_number = -1)search_number = read_serial.lastIndexOf("\n"); // 改行を検索する
-      if (search_number != -1)read_serial.remove(search_number);
+      search_number = read_serial.lastIndexOf(" ") ; // スペースを検索する
+      if (search_number = -1)search_number = read_serial.lastIndexOf("\n") ; // 改行を検索する
+      if (search_number != -1)read_serial.remove(search_number) ; // 該当する文字があったら消す
     }
 
     // 受信したときの処置
