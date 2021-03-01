@@ -238,7 +238,7 @@ void setting() {
   }
   SerialBT.disconnect(); // bluetooth ストップ
   delay(100);
-  setCpuFrequencyMhz(80); //周波数変更
+  setCpuFrequencyMhz(20); //周波数変更
   delay(100);
   M5.Lcd.fillScreen(BLACK); // 画面をクリア
   menu_lcd_draw(); // メニューのLCD表示
@@ -394,7 +394,7 @@ void setup()
   Wire.begin();
   //Serial.begin(115200);
 
-  EEPROM.begin(2); //EEPROM開始(サイズ指定)
+  EEPROM.begin(1024); //EEPROM開始(サイズ指定)
   EEPROM.get <set_data>(0, set_data_buf); // EEPROMを読み込む
 
   //CPU周波数変更
