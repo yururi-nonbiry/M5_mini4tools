@@ -30,6 +30,7 @@ struct set_data {
   byte RT_WC ; // rap time waiting count
   byte RT_WD ; // rap time waiting distance(mm)
   byte RT_TD ; // rap time trig distance(mm)
+  byte RT_IT ; // rap time invalid time(sec)
 };
 set_data set_data_buf; // 構造体宣言
 
@@ -38,10 +39,11 @@ set_data set_data_buf; // 構造体宣言
 void eeprom_reset() {
 
   String str = "rap_timer" ; // bluetoothデバイス名
-  str.toCharArray(set_data_buf.SBTDN, 10); 
+  str.toCharArray(set_data_buf.SBTDN, 10);
   set_data_buf.RT_WC = 50 ; // rap time waiting count　Type:byte
   set_data_buf.RT_WD = 20 ; // rap time waiting distance(mm) Type:byte
-  set_data_buf.RT_TD = 30 ; // rap time trig distance(mm) Type:byte
+  set_data_buf.RT_TD = 20 ; // rap time trig distance(mm) Type:byte
+  set_data_buf.RT_IT = 2 ; // rap time invalid time(sec)
   eeprom_write(); // EEPROM書き込み
 }
 
@@ -62,9 +64,9 @@ void sub_task(void* param) {
     time_count = millis(); // 1ループのタイム計測用
 
     if (sub_task_status == 0) { //何もしないモード
-      
+
       delay(100);
-      
+
     } else if (sub_task_status == 1) { //距離測定モード
 
       distance_read = sensor.readRangeContinuousMillimeters(); //距離測定
@@ -73,12 +75,12 @@ void sub_task(void* param) {
         // ここの処理はしなくても大丈夫
       }
     } else if (sub_task_status == 2) { // ラップタイム用
-      
+
       rap_time_start = 0 ; // スタート時間初期化
       rap_time_end =  0 ; // ストップ時間初期化
-      
+
       int distance_average ; // 距離の平均値を入れる変数
-      
+
       while (sub_task_status == 2) { // センサーの距離が安定するまで待つモード
         int distance_count[255]; // 距離を格納するための変数
         int distance_max = 0 ; // 最大値を初期化
@@ -96,7 +98,7 @@ void sub_task(void* param) {
           sub_task_status = 3; // ループを抜ける為、モードを3にする
         }
       }
-      
+
       while (sub_task_status == 3 ) { // スタート待ち
         if ( distance_average - sensor.readRangeContinuousMillimeters() > set_data_buf.RT_TD) { // 基準値から一定の距離近づいたらスタートする
           rap_time_start = millis(); // スタートの時間を記録する
@@ -104,7 +106,7 @@ void sub_task(void* param) {
         }
         delay(1); // wdtリセット用
       }
-      delay(5000); // 即停止しないように待つ
+      delay(1000 * set_data_buf.RT_IT); // 即停止しないように待つ
       while (sub_task_status == 3) { // ストップ待ち
         if (distance_average - sensor.readRangeContinuousMillimeters() > set_data_buf.RT_TD) { // 基準値から一定の距離近づいたらストップする
           rap_time_end = millis(); // ストップの時間を記録する
@@ -139,7 +141,6 @@ void test() {
     if (process_time < 10)M5.Lcd.print(F(" "));
     M5.Lcd.print(process_time);
     M5.Lcd.print(F("ms"));
-    //M5.Lcd.endWrite();
     M5.update(); // ボタンの状態を更新
     if (M5.BtnB.wasReleased()) {
       break;
@@ -195,6 +196,7 @@ void setting() {
         SerialBT.println(F("RT_WC, rap time waiting count　Type:byte"));
         SerialBT.println(F("RT_WD, rap time waiting distance(mm) Type:byte"));
         SerialBT.println(F("RT_TD, rap time trig distance(mm) Type:byte"));
+        SerialBT.println(F("RT_IT, rap time invalid time(sec) Type:byte"));
         SerialBT.println(F("save; Write the setting data to eeprom"));
         SerialBT.println(F("list; List of setting data"));
       } else if (read_serial.equalsIgnoreCase("list") == true) {
@@ -204,6 +206,7 @@ void setting() {
         SerialBT.print(F("RT_WC,")); SerialBT.print(set_data_buf.RT_WC); SerialBT.println(F(";")); // rap time waiting count　Type:byte
         SerialBT.print(F("RT_WD,")); SerialBT.print(set_data_buf.RT_WD); SerialBT.println(F(";")); // rap time waiting distance(mm) Type:byte
         SerialBT.print(F("RT_TD,")); SerialBT.print(set_data_buf.RT_TD); SerialBT.println(F(";")); // rap time trig distance(mm) Type:byte
+        SerialBT.print(F("RT_IT,")); SerialBT.print(set_data_buf.RT_IT); SerialBT.println(F(";")); // rap time invalid time(sec) Type:byte
       } else if (read_serial.equalsIgnoreCase("save") == true) {
         SerialBT.println(F("save;Write the setting data to eeprom"));
         eeprom_write();
@@ -213,19 +216,23 @@ void setting() {
         //char SBTN[21] ; //serial bluetooth name
         if (item_str == "SBTDN") {
           value_str.toCharArray(set_data_buf.SBTDN, value_str.length() + 1);
-          SerialBT.print(F("SBTDN,")); SerialBT.print(set_data_buf.SBTDN); SerialBT.println(F(";")); // rap time waiting count　Type:byte
+          SerialBT.print(F("SBTDN,")); SerialBT.print(set_data_buf.SBTDN); SerialBT.println(F(";"));
         }
         if (item_str == "RT_WC") {
           set_data_buf.RT_WC = value_str.toInt();
-          SerialBT.print(F("RT_WC,")); SerialBT.print(set_data_buf.RT_WC); SerialBT.println(F(";")); // rap time waiting count　Type:byte
+          SerialBT.print(F("RT_WC,")); SerialBT.print(set_data_buf.RT_WC); SerialBT.println(F(";"));
         }
         if (item_str == "RT_WD") {
           set_data_buf.RT_WD = value_str.toInt();
-          SerialBT.print(F("RT_WD,")); SerialBT.print(set_data_buf.RT_WD); SerialBT.println(F(";")); // rap time waiting count　Type:byte
+          SerialBT.print(F("RT_WD,")); SerialBT.print(set_data_buf.RT_WD); SerialBT.println(F(";"));
         }
         if (item_str == "RT_TD") {
           set_data_buf.RT_TD = value_str.toInt();
-          SerialBT.print(F("RT_TD,")); SerialBT.print(set_data_buf.RT_TD); SerialBT.println(F(";")); // rap time waiting count　Type:byte
+          SerialBT.print(F("RT_TD,")); SerialBT.print(set_data_buf.RT_TD); SerialBT.println(F(";"));
+        }
+        if (item_str == "RT_IT") {
+          set_data_buf.RT_TD = value_str.toInt();
+          SerialBT.print(F("RT_IT,")); SerialBT.print(set_data_buf.RT_IT); SerialBT.println(F(";"));
         }
       }
     }
