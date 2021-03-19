@@ -4,10 +4,15 @@
 #include <VL53L0X.h> //ToFセンサー
 #include "BluetoothSerial.h" // シリアルBT
 #include <EEPROM.h> // eeprom
+#include "esp_deep_sleep.h" //スリープ用
 
 //距離センサー定義
 VL53L0X sensor; // 距離センサー定義
 BluetoothSerial SerialBT; // シリアルBT定義
+
+// 各種定数
+#define BtnA_pin 37
+#define BtnB_pin 39
 
 // グローバル変数定義
 // サブタスク用
@@ -21,8 +26,15 @@ volatile unsigned long rap_time_start ; // スタート時間記録用
 volatile unsigned long rap_time_end ; // ストップ時間記録用
 volatile unsigned long rap_time ; // ラップタイム計算用
 
+//byte menu_count = 0;
+
 // メインルーチンのメニューカウント用
 byte menu_count = 0 ;
+byte BtnA_trig = 0; //ボタンを押したかの判定用
+byte BtnB_trig = 0; //ボタンを押したかの判定用
+volatile unsigned long BtnA_pushed = 0; //ボタンを押した時間
+volatile unsigned long BtnB_pushed = 0; //ボタンを押した時間
+byte draw_trig = 1;
 
 // EEPROMの構造体
 struct set_data {
@@ -35,6 +47,8 @@ struct set_data {
 set_data set_data_buf; // 構造体宣言
 
 
+
+
 // EEPROMリセット
 void eeprom_reset() {
 
@@ -42,7 +56,7 @@ void eeprom_reset() {
   str.toCharArray(set_data_buf.SBTDN, 10);
   set_data_buf.RT_WC = 50 ; // rap time waiting count　Type:byte
   set_data_buf.RT_WD = 20 ; // rap time waiting distance(mm) Type:byte
-  set_data_buf.RT_TD = 20 ; // rap time trig distance(mm) Type:byte
+  set_data_buf.RT_TD = 10 ; // rap time trig distance(mm) Type:byte
   set_data_buf.RT_IT = 2 ; // rap time invalid time(sec)
   eeprom_write(); // EEPROM書き込み
 }
@@ -53,6 +67,43 @@ void eeprom_write() {
   EEPROM.commit(); // これが必要らしい
 }
 
+
+// 割り込み処理(ボタン関係)
+void BtnA_push() {
+  delayMicroseconds(3000);
+  if (digitalRead(BtnA_pin) == LOW) {
+    //if (menu_count != 0)menu_count--;
+    BtnA_trig = 1;
+    BtnB_trig = 0;
+    BtnA_pushed = millis();
+    draw_trig = 1;
+  } else {
+    if (BtnA_trig == 1)BtnA_trig = 2;
+  }
+}
+
+void BtnB_push() {
+  delayMicroseconds(3000);
+  if (digitalRead(BtnB_pin) == LOW) {
+    //if (menu_count < 2)menu_count++;
+    BtnA_trig = 0;
+    BtnB_trig = 1;
+    BtnB_pushed = millis();
+    draw_trig = 1;
+  } else {
+    if (BtnB_trig == 1)BtnB_trig = 2;
+
+  }
+}
+
+//スリープ用
+void sleep_start() {
+
+  sensor.stopContinuous(); //測定停止
+  esp_sleep_enable_ext0_wakeup(GPIO_NUM_37, 0);//37番ピンでスリープ復帰
+  esp_deep_sleep_start(); //スリープスタート(復帰は先頭から)
+
+}
 
 //マルチタスク　core0
 //距離センサ関係
@@ -69,7 +120,7 @@ void sub_task(void* param) {
 
     } else if (sub_task_status == 1) { //距離測定モード
 
-      distance_read = sensor.readRangeContinuousMillimeters(); //距離測定
+      distance_read = sensor.readRangeContinuousMillimeters(); //距離読取(連続測定モード)
 
       if (sensor.timeoutOccurred()) { //センサータイムアウト時の処理()
         // ここの処理はしなくても大丈夫
@@ -141,8 +192,10 @@ void test() {
     if (process_time < 10)M5.Lcd.print(F(" "));
     M5.Lcd.print(process_time);
     M5.Lcd.print(F("ms"));
-    M5.update(); // ボタンの状態を更新
-    if (M5.BtnB.wasReleased()) {
+    //M5.update(); // ボタンの状態を更新
+    //if (M5.BtnB.wasReleased()) {
+    if (BtnB_trig != 0) {
+      BtnB_trig = 0;
       break;
     }
     delay(100);
@@ -238,8 +291,10 @@ void setting() {
     }
     read_serial = ""; //　クリア
     power_supply_draw();
-    M5.update(); // ボタンの状態を更新
-    if (M5.BtnB.wasReleased()) { //ボタンを押してたらループから抜ける
+    //M5.update(); // ボタンの状態を更新
+    if (BtnB_trig != 0) {
+      BtnB_trig = 0;
+      //if (M5.BtnB.wasReleased()) { //ボタンを押してたらループから抜ける
       break;
     }
   }
@@ -281,6 +336,10 @@ void rap_draw(unsigned long rap) {
   if (rap_minute < 10)M5.Lcd.print(F("0"));
   M5.Lcd.print(rap_minute);
   M5.Lcd.print(F("\'"));
+
+  //タイム表示拡大
+  M5.Lcd.setTextSize(4);          // 文字のサイズ
+  M5.Lcd.setCursor(20, 10);
   if (rap_second < 10)M5.Lcd.print(F("0"));
   M5.Lcd.print(rap_second);
   M5.Lcd.print(F("\""));
@@ -305,8 +364,10 @@ void rap_timer() {
 
     sub_task_status = 2; // サブタスクに距離センサーの変動が落ち着くかの確認をする
     while (sub_task_status == 2 ) { //サブタスクの準備完了まで待つ
-      M5.update(); // ボタンの状態を更新
-      if (M5.BtnB.wasReleased()) { //ボタンを押したら戻る
+      //M5.update(); // ボタンの状態を更新
+      //if (M5.BtnB.wasReleased()) { //ボタンを押したら戻る
+      if (BtnA_trig != 0) {
+        BtnA_trig = 0;
         sub_task_status = 0; // サブタスクを待機にする
         menu_lcd_draw(); // メニューを表示する
         return;
@@ -321,8 +382,10 @@ void rap_timer() {
     M5.Lcd.print(F("Ready..."));
 
     while (rap_time_start == 0 ) { //スタート時間が更新されたらスタートする
-      M5.update(); // ボタンの状態を更新
-      if (M5.BtnB.wasReleased()) { //ボタンを押したら戻る
+      //M5.update(); // ボタンの状態を更新
+      //if (M5.BtnB.wasReleased()) { //ボタンを押したら戻る
+      if (BtnA_trig != 0) {
+        BtnA_trig = 0;
         sub_task_status = 0; // サブタスクを待機にする
         menu_lcd_draw(); // メニューを表示する
         return;
@@ -333,8 +396,10 @@ void rap_timer() {
     while (rap_time_end == 0 ) { // ラップタイムの終わりが来るまでループする
 
       //途中で抜ける用
-      M5.update(); // ボタンの状態を更新
-      if (M5.BtnB.wasReleased()) { //ボタンを押したら戻る
+      // M5.update(); // ボタンの状態を更新
+      //if (M5.BtnB.wasReleased()) { //ボタンを押したら戻る
+      if (BtnA_trig != 0) {
+        BtnA_trig = 0;
         sub_task_status = 0; // サブタスクを待機にする
         menu_lcd_draw(); // メニューを表示する
         return;
@@ -347,14 +412,20 @@ void rap_timer() {
     rap_time = ( rap_time_end - rap_time_start) ;
     rap_draw(rap_time);
 
+    sleep_start();
+
     while (1) {
       //途中で抜ける用
-      M5.update(); // ボタンの状態を更新
-      if (M5.BtnB.wasReleased()) { //Bボタンを押したら戻る
+      //M5.update(); // ボタンの状態を更新
+      //if (M5.BtnB.wasReleased()) { //Bボタンを押したら戻る
+      if (BtnB_trig != 0) {
+        BtnB_trig = 0;
         sub_task_status = 0; // サブタスクを待機にする
         menu_lcd_draw(); // メニューを表示する
         return;
-      } else if (M5.BtnA.wasReleased()) { // 再スタート用
+      } else if (BtnA_trig != 0) {
+        BtnA_trig = 0;
+        //} else if (M5.BtnA.wasReleased()) { // 再スタート用
         sub_task_status = 0; // サブタスクを待機にする
         menu_lcd_draw(); // メニューを表示する
         break;
@@ -407,6 +478,30 @@ void setup()
   //CPU周波数変更
   setCpuFrequencyMhz(20);
 
+  // ボタンピン割り込み指示
+  pinMode(BtnA_pin, INPUT_PULLUP);
+  pinMode(BtnB_pin, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(BtnA_pin), BtnA_push, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(BtnB_pin), BtnB_push, CHANGE);
+
+
+  // ToFセンサー設定
+  sensor.init();
+  sensor.setTimeout(1000);
+  sensor.startContinuous(0);//連続読み取りモード
+  sensor.setMeasurementTimingBudget(20000);
+  //sensor.startContinuous();
+
+
+  //sleep設定用
+  esp_deep_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON); // Deep Sleep中にPull Up を保持するため
+  // Deep Sleep中にメモリを保持するため
+  esp_deep_sleep_pd_config(ESP_PD_DOMAIN_RTC_SLOW_MEM, ESP_PD_OPTION_ON);
+  esp_deep_sleep_pd_config(ESP_PD_DOMAIN_RTC_FAST_MEM, ESP_PD_OPTION_ON);
+
+  esp_deep_sleep_pd_config(ESP_PD_DOMAIN_MAX, ESP_PD_OPTION_OFF);
+
+
   //マルチタスク用の宣言
   xTaskCreatePinnedToCore(sub_task, "sub_task", 8192, NULL, 1, NULL, 0);
 
@@ -425,8 +520,10 @@ void loop()
   M5.Lcd.setTextColor(WHITE, BLACK); // 文字の色
 
   //EEPROMリセット
-  M5.update(); // ボタンの状態を更新
-  if (M5.BtnA.isPressed() == 1) {
+  if (BtnB_trig != 0) {
+    BtnB_trig = 0;
+    //M5.update(); // ボタンの状態を更新
+    //if (M5.BtnA.isPressed() == 1) {
     M5.Lcd.print(F("EEPROM Reset"));
     delay(1000);
     eeprom_reset();
@@ -441,12 +538,9 @@ void loop()
   M5.Lcd.setCursor(5, 10);
   M5.Lcd.print(F("senser connect"));
 
-  // ToFセンサー設定
-  sensor.init();
-  sensor.setTimeout(1000);
-  sensor.startContinuous(0);
-  sensor.setMeasurementTimingBudget(20000);
-  sensor.startContinuous();
+  //ここでスリープからの復帰なのかの判断をする
+  esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+  //if(cause != ESP_SLEEP_WAKEUP_ULP) {}
 
   //画面クリア
   M5.Lcd.setHighlightColor(TFT_BLACK);
@@ -454,14 +548,20 @@ void loop()
 
   //ここからループ
   while (1) {
-    M5.update(); // ボタンの状態を更新
-    if (M5.BtnB.wasReleased()) {
-      if (menu_count < 2) menu_count ++ ;
+    //M5.update(); // ボタンの状態を更新
+    //if (M5.BtnB.wasReleased()) {
+    if (BtnB_trig != 0) {
+      BtnB_trig = 0;
+      menu_count ++ ;
+      //if (menu_count < 2) menu_count ++ ;
+      if (menu_count == 3)menu_count = 0;
       menu_lcd_draw();
     } else if (M5.Axp.GetBtnPress() == 2) {
       if (menu_count > 0) menu_count --;
       menu_lcd_draw();
-    } else if (M5.BtnA.wasReleased()) {
+      //} else if (M5.BtnA.wasReleased()) {
+    } else if (BtnA_trig != 0) {
+      BtnA_trig = 0;
       if (menu_count == 0)rap_timer();
       if (menu_count == 1)setting();
       if (menu_count == 2)test();
