@@ -116,7 +116,7 @@ void sub_task(void* param) {
   sensor.setMeasurementTimingBudget(20000);
   sensor.startContinuous(); //連続読取スタート
 
-
+  delay(100);
   // ここから繰り返し
   while (1) {
 
@@ -125,7 +125,9 @@ void sub_task(void* param) {
       delay(100);
 
     } else if (sub_task_status == 1) { //距離測定モード
-
+      sensor.setTimeout(1000);
+      sensor.startContinuous(0);//連続読み取りモード
+      sensor.setMeasurementTimingBudget(20000);
       sensor.startContinuous(); //連続読取スタート
 
       while (sub_task_status == 1) {
@@ -493,18 +495,10 @@ void setup_c() {
 
 
 
-  //マルチタスク用の宣言
-  xTaskCreatePinnedToCore(sub_task, "sub_task", 8192, NULL, 1, NULL, 0);
+ 
 
 
-  //画面初期化
-  M5.begin();
-  M5.Axp.ScreenBreath(8);         // バックライトの明るさ(7-15)
-  M5.Lcd.setRotation(1);          // 表示の向き
-  M5.Lcd.fillScreen(BLACK);   //LCD背景色
-  M5.Lcd.setTextFont(1);
-  M5.Lcd.setTextSize(2);          // 文字のサイズ
-  M5.Lcd.setTextColor(WHITE, BLACK); // 文字の色
+
 
   //EEPROMリセット
   if (BtnB_trig != 0) {
@@ -541,6 +535,18 @@ void setup()
 
   esp_deep_sleep_pd_config(ESP_PD_DOMAIN_MAX, ESP_PD_OPTION_OFF);
 
+  //画面初期化
+  M5.begin();
+  M5.Axp.ScreenBreath(8);         // バックライトの明るさ(7-15)
+  M5.Lcd.setRotation(1);          // 表示の向き
+  M5.Lcd.fillScreen(BLACK);   //LCD背景色
+  M5.Lcd.setTextFont(1);
+  M5.Lcd.setTextSize(2);          // 文字のサイズ
+  M5.Lcd.setTextColor(WHITE, BLACK); // 文字の色
+
+ //マルチタスク用の宣言
+  xTaskCreatePinnedToCore(sub_task, "sub_task", 8192, NULL, 1, NULL, 0);
+
 }
 
 //メインルーチン
@@ -548,10 +554,10 @@ void loop()
 {
   //ここでスリープからの復帰なのかの判断をする
   esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
-  if (cause != ESP_SLEEP_WAKEUP_EXT0) {
+  if (cause == ESP_SLEEP_WAKEUP_EXT0) {
     //トリガーで戻ったときの処理
 
-  } else if (cause != ESP_SLEEP_WAKEUP_TIMER) {
+  } else if (cause == ESP_SLEEP_WAKEUP_TIMER) {
     //タイマーで戻ったときの処理
 
   } else {
