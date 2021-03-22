@@ -99,7 +99,7 @@ void BtnB_push() {
 //スリープ用
 void sleep_start() {
 
-  sensor.stopContinuous(); //測定停止
+
   esp_sleep_enable_ext0_wakeup(GPIO_NUM_37, 0);//37番ピンでスリープ復帰
   esp_deep_sleep_start(); //スリープスタート(復帰は先頭から)
 
@@ -109,10 +109,16 @@ void sleep_start() {
 //距離センサ関係
 void sub_task(void* param) {
 
+  // ToFセンサー設定
+  sensor.init();
+  sensor.setTimeout(1000);
+  sensor.startContinuous(0);//連続読み取りモード
+  sensor.setMeasurementTimingBudget(20000);
+  sensor.startContinuous(); //連続読取スタート
+
+
   // ここから繰り返し
   while (1) {
-
-    time_count = millis(); // 1ループのタイム計測用
 
     if (sub_task_status == 0) { //何もしないモード
 
@@ -120,12 +126,23 @@ void sub_task(void* param) {
 
     } else if (sub_task_status == 1) { //距離測定モード
 
-      distance_read = sensor.readRangeContinuousMillimeters(); //距離読取(連続測定モード)
+      sensor.startContinuous(); //連続読取スタート
 
-      if (sensor.timeoutOccurred()) { //センサータイムアウト時の処理()
-        // ここの処理はしなくても大丈夫
+      while (sub_task_status == 1) {
+        time_count = millis(); // 1ループのタイム計測用
+        distance_read = sensor.readRangeContinuousMillimeters(); //距離読取(連続測定モード)
+
+        if (sensor.timeoutOccurred()) { //センサータイムアウト時の処理()
+          // ここの処理はしなくても大丈夫
+        }
+        process_time = millis() - time_count ; // 1ループの時間計測
+        delay(5);
       }
+      sensor.stopContinuous(); //測定停止
+
     } else if (sub_task_status == 2) { // ラップタイム用
+
+      sensor.startContinuous(); //連続読取スタート
 
       rap_time_start = 0 ; // スタート時間初期化
       rap_time_end =  0 ; // ストップ時間初期化
@@ -165,9 +182,10 @@ void sub_task(void* param) {
         }
         delay(1); // wdtリセット用
       }
+      sensor.stopContinuous(); //測定停止
     }
     delay(10); // wdtリセット用
-    process_time = millis() - time_count ; // 1ループの時間計測
+
 
   }
 }
@@ -466,50 +484,19 @@ void power_supply_draw() {
 }
 
 
-//セットアップ
-void setup()
-{
-  Wire.begin();
-  //Serial.begin(115200);
+//セットアップ カスタム
+void setup_c() {
+  //ここにsetupを移行(deep sleep 対応の為)
 
-  EEPROM.begin(1024); //EEPROM開始(サイズ指定)
+  //Serial.begin(115200);
   EEPROM.get <set_data>(0, set_data_buf); // EEPROMを読み込む
 
-  //CPU周波数変更
-  setCpuFrequencyMhz(20);
-
-  // ボタンピン割り込み指示
-  pinMode(BtnA_pin, INPUT_PULLUP);
-  pinMode(BtnB_pin, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(BtnA_pin), BtnA_push, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(BtnB_pin), BtnB_push, CHANGE);
-
-
-  // ToFセンサー設定
-  sensor.init();
-  sensor.setTimeout(1000);
-  sensor.startContinuous(0);//連続読み取りモード
-  sensor.setMeasurementTimingBudget(20000);
-  //sensor.startContinuous();
-
-
-  //sleep設定用
-  esp_deep_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON); // Deep Sleep中にPull Up を保持するため
-  // Deep Sleep中にメモリを保持するため
-  esp_deep_sleep_pd_config(ESP_PD_DOMAIN_RTC_SLOW_MEM, ESP_PD_OPTION_ON);
-  esp_deep_sleep_pd_config(ESP_PD_DOMAIN_RTC_FAST_MEM, ESP_PD_OPTION_ON);
-
-  esp_deep_sleep_pd_config(ESP_PD_DOMAIN_MAX, ESP_PD_OPTION_OFF);
 
 
   //マルチタスク用の宣言
   xTaskCreatePinnedToCore(sub_task, "sub_task", 8192, NULL, 1, NULL, 0);
 
-}
 
-//メインルーチン
-void loop()
-{
   //画面初期化
   M5.begin();
   M5.Axp.ScreenBreath(8);         // バックライトの明るさ(7-15)
@@ -530,6 +517,47 @@ void loop()
     M5.Lcd.fillScreen(BLACK);   // 画面リセット
   }
 
+}
+
+//セットアップ
+void setup()
+{
+  //deep sleep復帰時のコントロールの為、ここには復帰時も実行する物を書く
+  Wire.begin(); //i2cスタート
+  EEPROM.begin(1024); //EEPROM開始(サイズ指定)
+  setCpuFrequencyMhz(20);//CPU周波数変更
+
+  // ボタンピン割り込み指示
+  pinMode(BtnA_pin, INPUT_PULLUP);
+  pinMode(BtnB_pin, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(BtnA_pin), BtnA_push, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(BtnB_pin), BtnB_push, CHANGE);
+
+  //sleep設定用
+  esp_deep_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON); // Deep Sleep中にPull Up を保持するため
+  // Deep Sleep中にメモリを保持するため
+  esp_deep_sleep_pd_config(ESP_PD_DOMAIN_RTC_SLOW_MEM, ESP_PD_OPTION_ON);
+  esp_deep_sleep_pd_config(ESP_PD_DOMAIN_RTC_FAST_MEM, ESP_PD_OPTION_ON);
+
+  esp_deep_sleep_pd_config(ESP_PD_DOMAIN_MAX, ESP_PD_OPTION_OFF);
+
+}
+
+//メインルーチン
+void loop()
+{
+  //ここでスリープからの復帰なのかの判断をする
+  esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+  if (cause != ESP_SLEEP_WAKEUP_EXT0) {
+    //トリガーで戻ったときの処理
+
+  } else if (cause != ESP_SLEEP_WAKEUP_TIMER) {
+    //タイマーで戻ったときの処理
+
+  } else {
+    //通常起動時の処理
+    setup_c();
+  }
   //画面クリア
   M5.Lcd.setHighlightColor(TFT_BLACK);
   menu_lcd_draw();
@@ -538,9 +566,7 @@ void loop()
   M5.Lcd.setCursor(5, 10);
   M5.Lcd.print(F("senser connect"));
 
-  //ここでスリープからの復帰なのかの判断をする
-  esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
-  //if(cause != ESP_SLEEP_WAKEUP_ULP) {}
+
 
   //画面クリア
   M5.Lcd.setHighlightColor(TFT_BLACK);
