@@ -121,6 +121,7 @@ void sub_task(void* param) {
       delay(100);
 
     } else if (sub_task_status == 1) { //距離測定モード
+      sensor.init();
       sensor.setTimeout(1000);
       sensor.startContinuous(0);//連続読み取りモード
       sensor.setMeasurementTimingBudget(20000);
@@ -139,7 +140,7 @@ void sub_task(void* param) {
       sensor.stopContinuous(); //測定停止
 
     } else if (sub_task_status == 2) { // ラップタイム用
-
+      sensor.init();
       sensor.setTimeout(1000);
       sensor.startContinuous(0);//連続読み取りモード
       sensor.setMeasurementTimingBudget(20000);
@@ -493,6 +494,8 @@ void setup_c() {
   EEPROM.get <set_data>(0, set_data_buf); // EEPROMを読み込む
 
   //画面は初期化されているのでこっち
+  //画面初期化
+  M5.begin();
   M5.Axp.ScreenBreath(8);         // バックライトの明るさ(7-15)
   M5.Lcd.setRotation(1);          // 表示の向き
   M5.Lcd.fillScreen(BLACK);   //LCD背景色
@@ -535,8 +538,7 @@ void setup()
 
   esp_deep_sleep_pd_config(ESP_PD_DOMAIN_MAX, ESP_PD_OPTION_OFF);
 
-  //画面初期化
-  M5.begin();
+
 
   //マルチタスク用の宣言
   xTaskCreatePinnedToCore(sub_task, "sub_task", 8192, NULL, 1, NULL, 0);
