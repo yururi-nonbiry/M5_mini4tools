@@ -111,10 +111,6 @@ void sub_task(void* param) {
 
   // ToFセンサー設定
   sensor.init();
-  sensor.setTimeout(1000);
-  sensor.startContinuous(0);//連続読み取りモード
-  sensor.setMeasurementTimingBudget(20000);
-  sensor.startContinuous(); //連続読取スタート
 
   delay(100);
   // ここから繰り返し
@@ -144,6 +140,9 @@ void sub_task(void* param) {
 
     } else if (sub_task_status == 2) { // ラップタイム用
 
+      sensor.setTimeout(1000);
+      sensor.startContinuous(0);//連続読み取りモード
+      sensor.setMeasurementTimingBudget(20000);
       sensor.startContinuous(); //連続読取スタート
 
       rap_time_start = 0 ; // スタート時間初期化
@@ -359,7 +358,7 @@ void rap_draw(unsigned long rap) {
 
   //タイム表示拡大
   M5.Lcd.setTextSize(4);          // 文字のサイズ
-  M5.Lcd.setCursor(20, 10);
+  M5.Lcd.setCursor(30, 10);
   if (rap_second < 10)M5.Lcd.print(F("0"));
   M5.Lcd.print(rap_second);
   M5.Lcd.print(F("\""));
@@ -493,12 +492,13 @@ void setup_c() {
   //Serial.begin(115200);
   EEPROM.get <set_data>(0, set_data_buf); // EEPROMを読み込む
 
-
-
- 
-
-
-
+  //画面は初期化されているのでこっち
+  M5.Axp.ScreenBreath(8);         // バックライトの明るさ(7-15)
+  M5.Lcd.setRotation(1);          // 表示の向き
+  M5.Lcd.fillScreen(BLACK);   //LCD背景色
+  M5.Lcd.setTextFont(1);
+  M5.Lcd.setTextSize(2);          // 文字のサイズ
+  M5.Lcd.setTextColor(WHITE, BLACK); // 文字の色
 
   //EEPROMリセット
   if (BtnB_trig != 0) {
@@ -537,14 +537,8 @@ void setup()
 
   //画面初期化
   M5.begin();
-  M5.Axp.ScreenBreath(8);         // バックライトの明るさ(7-15)
-  M5.Lcd.setRotation(1);          // 表示の向き
-  M5.Lcd.fillScreen(BLACK);   //LCD背景色
-  M5.Lcd.setTextFont(1);
-  M5.Lcd.setTextSize(2);          // 文字のサイズ
-  M5.Lcd.setTextColor(WHITE, BLACK); // 文字の色
 
- //マルチタスク用の宣言
+  //マルチタスク用の宣言
   xTaskCreatePinnedToCore(sub_task, "sub_task", 8192, NULL, 1, NULL, 0);
 
 }
