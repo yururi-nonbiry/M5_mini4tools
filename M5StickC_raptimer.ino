@@ -105,7 +105,6 @@ void sleep_start() {
     // Deep Sleep中にメモリを保持するため
     esp_deep_sleep_pd_config(ESP_PD_DOMAIN_RTC_SLOW_MEM, ESP_PD_OPTION_ON);
     esp_deep_sleep_pd_config(ESP_PD_DOMAIN_RTC_FAST_MEM, ESP_PD_OPTION_ON);
-
     esp_deep_sleep_pd_config(ESP_PD_DOMAIN_MAX, ESP_PD_OPTION_OFF);
   */
   esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON);
@@ -373,7 +372,7 @@ void rap_draw(unsigned long rap) {
 
   //タイム表示拡大
   M5.Lcd.setTextSize(4);          // 文字のサイズ
-  M5.Lcd.setCursor(30, 10);
+  M5.Lcd.setCursor(10, 30);
   if (rap_second < 10)M5.Lcd.print(F("0"));
   M5.Lcd.print(rap_second);
   M5.Lcd.print(F("\""));
@@ -558,10 +557,8 @@ void loop()
     esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
     if (cause == ESP_SLEEP_WAKEUP_EXT0) {
     //トリガーで戻ったときの処理
-
     } else if (cause == ESP_SLEEP_WAKEUP_TIMER) {
     //タイマーで戻ったときの処理
-
     } else {
     //通常起動時の処理
     setup_c();
