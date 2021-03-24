@@ -5,6 +5,7 @@
 #include "BluetoothSerial.h" // シリアルBT
 #include <EEPROM.h> // eeprom
 #include "esp_deep_sleep.h" //スリープ用
+#include "esp_sleep.h"
 
 //距離センサー定義
 VL53L0X sensor; // 距離センサー定義
@@ -99,9 +100,23 @@ void BtnB_push() {
 //スリープ用
 void sleep_start() {
 
+  /*  //sleep設定用
+    esp_deep_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON); // Deep Sleep中にPull Up を保持するため
+    // Deep Sleep中にメモリを保持するため
+    esp_deep_sleep_pd_config(ESP_PD_DOMAIN_RTC_SLOW_MEM, ESP_PD_OPTION_ON);
+    esp_deep_sleep_pd_config(ESP_PD_DOMAIN_RTC_FAST_MEM, ESP_PD_OPTION_ON);
 
+    esp_deep_sleep_pd_config(ESP_PD_DOMAIN_MAX, ESP_PD_OPTION_OFF);
+  */
+  esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON);
+
+  //esp_deep_sleep_enable_timer_wakeup(3 * 1000 * 1000);//3秒ごとに復帰(バッテリー確認の為)
+  //esp_sleep_enable_timer_wakeup(1000000LL * 3);
   esp_sleep_enable_ext0_wakeup(GPIO_NUM_37, 0);//37番ピンでスリープ復帰
-  esp_deep_sleep_start(); //スリープスタート(復帰は先頭から)
+
+  delay(100);
+  //esp_deep_sleep_start(); //スリープスタート(復帰は先頭から)
+  esp_light_sleep_start();
 
 }
 
@@ -109,7 +124,6 @@ void sleep_start() {
 //距離センサ関係
 void sub_task(void* param) {
 
-  // ToFセンサー設定
   sensor.init();
 
   delay(100);
@@ -121,7 +135,7 @@ void sub_task(void* param) {
       delay(100);
 
     } else if (sub_task_status == 1) { //距離測定モード
-      sensor.init();
+
       sensor.setTimeout(1000);
       sensor.startContinuous(0);//連続読み取りモード
       sensor.setMeasurementTimingBudget(20000);
@@ -140,7 +154,7 @@ void sub_task(void* param) {
       sensor.stopContinuous(); //測定停止
 
     } else if (sub_task_status == 2) { // ラップタイム用
-      sensor.init();
+
       sensor.setTimeout(1000);
       sensor.startContinuous(0);//連続読み取りモード
       sensor.setMeasurementTimingBudget(20000);
@@ -160,7 +174,7 @@ void sub_task(void* param) {
           distance_read = sensor.readRangeContinuousMillimeters(); // 距離測定
           if ( distance_max < distance_read )distance_max = distance_read; // 最大値の更新
           if ( distance_min > distance_read )distance_min = distance_read; // 最小値の更新
-          delay(10); // wdtリセット用
+          delay(5); // wdtリセット用
         }
 
         if (distance_max - distance_min < set_data_buf.RT_WD) { // 距離の変動が一定以下なら抜ける
@@ -174,7 +188,7 @@ void sub_task(void* param) {
           rap_time_start = millis(); // スタートの時間を記録する
           break; // whileを抜ける
         }
-        delay(1); // wdtリセット用
+        delay(5); // wdtリセット用
       }
       delay(1000 * set_data_buf.RT_IT); // 即停止しないように待つ
       while (sub_task_status == 3) { // ストップ待ち
@@ -182,7 +196,7 @@ void sub_task(void* param) {
           rap_time_end = millis(); // ストップの時間を記録する
           break; // whileを抜ける
         }
-        delay(1); // wdtリセット用
+        delay(5); // wdtリセット用
       }
       sensor.stopContinuous(); //測定停止
     }
@@ -491,7 +505,23 @@ void setup_c() {
   //ここにsetupを移行(deep sleep 対応の為)
 
   //Serial.begin(115200);
+
+}
+
+//セットアップ
+void setup()
+{
+  //deep sleep復帰時のコントロールの為、ここには復帰時も実行する物を書く
+  Wire.begin(); //i2cスタート
+  EEPROM.begin(1024); //EEPROM開始(サイズ指定)
   EEPROM.get <set_data>(0, set_data_buf); // EEPROMを読み込む
+  setCpuFrequencyMhz(20);//CPU周波数変更
+
+  // ボタンピン割り込み指示
+  pinMode(BtnA_pin, INPUT_PULLUP);
+  pinMode(BtnB_pin, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(BtnA_pin), BtnA_push, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(BtnB_pin), BtnB_push, CHANGE);
 
   //画面は初期化されているのでこっち
   //画面初期化
@@ -503,9 +533,13 @@ void setup_c() {
   M5.Lcd.setTextSize(2);          // 文字のサイズ
   M5.Lcd.setTextColor(WHITE, BLACK); // 文字の色
 
+
+  //マルチタスク用の宣言
+  xTaskCreatePinnedToCore(sub_task, "sub_task", 8192, NULL, 1, NULL, 0);
+
   //EEPROMリセット
-  if (BtnB_trig != 0) {
-    BtnB_trig = 0;
+  if (digitalRead(BtnA_pin) == LOW) {
+    BtnA_trig = 0;
     //M5.update(); // ボタンの状態を更新
     //if (M5.BtnA.isPressed() == 1) {
     M5.Lcd.print(F("EEPROM Reset"));
@@ -516,50 +550,23 @@ void setup_c() {
 
 }
 
-//セットアップ
-void setup()
-{
-  //deep sleep復帰時のコントロールの為、ここには復帰時も実行する物を書く
-  Wire.begin(); //i2cスタート
-  EEPROM.begin(1024); //EEPROM開始(サイズ指定)
-  setCpuFrequencyMhz(20);//CPU周波数変更
-
-  // ボタンピン割り込み指示
-  pinMode(BtnA_pin, INPUT_PULLUP);
-  pinMode(BtnB_pin, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(BtnA_pin), BtnA_push, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(BtnB_pin), BtnB_push, CHANGE);
-
-  //sleep設定用
-  esp_deep_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON); // Deep Sleep中にPull Up を保持するため
-  // Deep Sleep中にメモリを保持するため
-  esp_deep_sleep_pd_config(ESP_PD_DOMAIN_RTC_SLOW_MEM, ESP_PD_OPTION_ON);
-  esp_deep_sleep_pd_config(ESP_PD_DOMAIN_RTC_FAST_MEM, ESP_PD_OPTION_ON);
-
-  esp_deep_sleep_pd_config(ESP_PD_DOMAIN_MAX, ESP_PD_OPTION_OFF);
-
-
-
-  //マルチタスク用の宣言
-  xTaskCreatePinnedToCore(sub_task, "sub_task", 8192, NULL, 1, NULL, 0);
-
-}
-
 //メインルーチン
 void loop()
 {
-  //ここでスリープからの復帰なのかの判断をする
-  esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
-  if (cause == ESP_SLEEP_WAKEUP_EXT0) {
+  /*
+    //ここでスリープからの復帰なのかの判断をする
+    esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+    if (cause == ESP_SLEEP_WAKEUP_EXT0) {
     //トリガーで戻ったときの処理
 
-  } else if (cause == ESP_SLEEP_WAKEUP_TIMER) {
+    } else if (cause == ESP_SLEEP_WAKEUP_TIMER) {
     //タイマーで戻ったときの処理
 
-  } else {
+    } else {
     //通常起動時の処理
     setup_c();
-  }
+    }
+  */
   //画面クリア
   M5.Lcd.setHighlightColor(TFT_BLACK);
   menu_lcd_draw();
@@ -567,7 +574,6 @@ void loop()
   M5.Lcd.setTextSize(2);          // 文字のサイズ
   M5.Lcd.setCursor(5, 10);
   M5.Lcd.print(F("senser connect"));
-
 
 
   //画面クリア
