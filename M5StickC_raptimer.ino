@@ -15,6 +15,8 @@ BluetoothSerial SerialBT; // シリアルBT定義
 #define BtnA_pin 37
 #define BtnB_pin 39
 
+#define sleep_time 5000 //(ms)経過したらsleepする
+
 // グローバル変数定義
 // サブタスク用
 volatile byte sub_task_status = 0 ; //サブタスクの処理指示用
@@ -35,6 +37,7 @@ byte BtnA_trig = 0; //ボタンを押したかの判定用
 byte BtnB_trig = 0; //ボタンを押したかの判定用
 volatile unsigned long BtnA_pushed = 0; //ボタンを押した時間
 volatile unsigned long BtnB_pushed = 0; //ボタンを押した時間
+volatile unsigned long action_time = 0; //ボタンを押した時間
 byte draw_trig = 1;
 
 // EEPROMの構造体
@@ -71,6 +74,7 @@ void eeprom_write() {
 
 // 割り込み処理(ボタン関係)
 void BtnA_push() {
+  action_time = millis();//操作した時間を更新する
   delayMicroseconds(3000);
   if (digitalRead(BtnA_pin) == LOW) {
     //if (menu_count != 0)menu_count--;
@@ -84,6 +88,7 @@ void BtnA_push() {
 }
 
 void BtnB_push() {
+  action_time = millis();//操作した時間を更新する
   delayMicroseconds(3000);
   if (digitalRead(BtnB_pin) == LOW) {
     //if (menu_count < 2)menu_count++;
@@ -100,23 +105,40 @@ void BtnB_push() {
 //スリープ用
 void sleep_start() {
 
-  /*  //sleep設定用
-    esp_deep_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON); // Deep Sleep中にPull Up を保持するため
-    // Deep Sleep中にメモリを保持するため
-    esp_deep_sleep_pd_config(ESP_PD_DOMAIN_RTC_SLOW_MEM, ESP_PD_OPTION_ON);
-    esp_deep_sleep_pd_config(ESP_PD_DOMAIN_RTC_FAST_MEM, ESP_PD_OPTION_ON);
-    esp_deep_sleep_pd_config(ESP_PD_DOMAIN_MAX, ESP_PD_OPTION_OFF);
-  */
-  esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON);
+  if (millis() - action_time > sleep_time) { //操作してからある程度時間が空いたらスリープに入る
 
-  //esp_deep_sleep_enable_timer_wakeup(3 * 1000 * 1000);//3秒ごとに復帰(バッテリー確認の為)
-  //esp_sleep_enable_timer_wakeup(1000000LL * 3);
-  esp_sleep_enable_ext0_wakeup(GPIO_NUM_37, 0);//37番ピンでスリープ復帰
+    //スリープ時にSを表示
+    M5.Lcd.setTextSize(1);          // 文字のサイズ
+    M5.Lcd.setCursor(0, 0);
+    M5.Lcd.print(F("S"));
 
-  delay(100);
-  //esp_deep_sleep_start(); //スリープスタート(復帰は先頭から)
-  esp_light_sleep_start();
+    /*  //sleep設定用
+      esp_deep_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON); // Deep Sleep中にPull Up を保持するため
+      // Deep Sleep中にメモリを保持するため
+      esp_deep_sleep_pd_config(ESP_PD_DOMAIN_RTC_SLOW_MEM, ESP_PD_OPTION_ON);
+      esp_deep_sleep_pd_config(ESP_PD_DOMAIN_RTC_FAST_MEM, ESP_PD_OPTION_ON);
+      esp_deep_sleep_pd_config(ESP_PD_DOMAIN_MAX, ESP_PD_OPTION_OFF);
+    */
+    esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON);
 
+    esp_deep_sleep_enable_timer_wakeup(3 * 1000 * 1000);//3秒ごとに復帰(バッテリー確認の為)
+    //esp_sleep_enable_timer_wakeup(1000000LL * 3);
+    esp_sleep_enable_ext0_wakeup(GPIO_NUM_37, 0);//37番ピンでスリープ復帰
+
+    delay(100);
+    //esp_deep_sleep_start(); //スリープスタート(復帰は先頭から)
+    esp_light_sleep_start();
+
+    //復帰した後の処理
+    delay(10);
+
+    //"Sを消す"
+    M5.Lcd.setTextSize(1);
+    M5.Lcd.setCursor(0, 0);
+    M5.Lcd.print(F(" "));
+
+    power_supply_draw(); //バッテリー表示
+  }
 }
 
 //マルチタスク　core0
@@ -426,7 +448,9 @@ void rap_timer() {
       power_supply_draw(); // バッテリー表示
       delay(10);
     }
-    while (rap_time_end == 0 ) { // ラップタイムの終わりが来るまでループする
+    M5.Lcd.fillScreen(BLACK);  // スタートしたら一回画面をクリアする
+    power_supply_draw(); // バッテリー表示
+      while (rap_time_end == 0 ) { // ラップタイムの終わりが来るまでループする
 
       //途中で抜ける用
       // M5.update(); // ボタンの状態を更新
@@ -445,9 +469,9 @@ void rap_timer() {
     rap_time = ( rap_time_end - rap_time_start) ;
     rap_draw(rap_time);
 
-    sleep_start();
 
     while (1) {
+      sleep_start(); //スリープに入る
       //途中で抜ける用
       //M5.update(); // ボタンの状態を更新
       //if (M5.BtnB.wasReleased()) { //Bボタンを押したら戻る
@@ -599,5 +623,6 @@ void loop()
     }
     power_supply_draw();
     delay(10);
+    sleep_start(); //スリープに入る
   }
 }
