@@ -72,7 +72,8 @@ struct set_data {
   byte RT_WD ; // rap time waiting distance(mm)
   byte RT_TD ; // rap time trig distance(mm)
   byte RT_IT ; // rap time invalid time(sec)
-  S ; // fft strength（0-20）
+  byte RT_FF ; // fft frequency(2-16) Type:byte"
+  byte RT_FS ; // fft strength(0-20) Type:byte"
 };
 set_data set_data_buf; // 構造体宣言
 
@@ -356,24 +357,24 @@ void test_fft() {
     M5.Lcd.print(process_time);
     M5.Lcd.print(F("ms"));
 
-     double vReal_max = 0;
-  //最大値判定
-  for (int count = 2; count <= 255; count++) {
-    if (vReal[count] > vReal_max)vReal_max = vReal[count];
-  }
+    double vReal_max = 0;
+    //最大値判定
+    for (int count = 2; count <= 255; count++) {
+      if (vReal_accel_z[count] > vReal_max)vReal_max = vReal_accel_z[count];
+    }
 
-  //M5.Lcd.fillScreen(BLACK);
+    //M5.Lcd.fillScreen(BLACK);
 
 
-  M5.Lcd.drawLine( 41, 19, 41, 219, BLACK);
-  M5.Lcd.drawLine( 42, 19, 42, 219, BLACK);
-  
-  for (int count = 3; count < SAMPLES/2; count++) {
+    M5.Lcd.drawLine( 41, 19, 41, 219, BLACK);
+    M5.Lcd.drawLine( 42, 19, 42, 219, BLACK);
 
-    M5.Lcd.drawLine( count + 5 , round(70 - vReal[count - 1]  ) + 5 , count + 41 , round(70 - vReal[count] ) + 5 , YELLOW);
-    M5.Lcd.drawLine( count + 6, 5, count + 6, 75, BLACK);
-    //M5.Lcd.drawPixel( count + 40 , round(200 - vReal[count] * 200 / 4096 ) + 20 , WHITE);
-  }
+    for (int count = 3; count < SAMPLES / 2; count++) {
+
+      M5.Lcd.drawLine( count + 5 , round(70 - vReal_accel_z[count - 1]  ) + 5 , count + 41 , round(70 - vReal_accel_z[count] ) + 5 , YELLOW);
+      M5.Lcd.drawLine( count + 6, 5, count + 6, 75, BLACK);
+      //M5.Lcd.drawPixel( count + 40 , round(200 - vReal[count] * 200 / 4096 ) + 20 , WHITE);
+    }
 
 
     //M5.update(); // ボタンの状態を更新
