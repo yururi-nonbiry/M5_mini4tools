@@ -21,8 +21,8 @@ BluetoothSerial SerialBT; // シリアルBT定義
 #define BtnB_pin 39
 
 #define sleep_time 5000 //(ms)経過したらsleepする
-
 #define device_address 0x68 // 加速度センサーのアドレス
+#define acc_coe 1 // 加速度の係数
 
 //FFT定義
 arduinoFFT FFT = arduinoFFT();
@@ -40,11 +40,11 @@ volatile float read_voltage ;//電圧読取用
 volatile float read_current ;//電流読取用
 volatile unsigned long rap_time_start ; // スタート時間記録用
 volatile unsigned long rap_time_end ; // ストップ時間記録用
-volatile unsigned long rap_time ; // ラップタイム計算用
+volatile unsigned long rap_time[10] ; // ラップタイム計算用
+volatile byte raptime_count = 0;
 
 //グローバル変数
 float accel_z = 0.0F;
-
 float gyro_z = 0.0F;
 
 unsigned int sampling_period_us;
@@ -73,12 +73,9 @@ struct set_data {
   byte RT_TD ; // rap time trig distance(mm)
   byte RT_IT ; // rap time invalid time(sec)
   byte RT_FF ; // fft frequency(2-16) Type:byte"
-  byte RT_FS ; // fft strength(0-20) Type:byte"
+  byte RT_FS ; // fft strength(1-70) Type:byte"
 };
 set_data set_data_buf; // 構造体宣言
-
-
-
 
 // EEPROMリセット
 void eeprom_reset() {
@@ -90,7 +87,7 @@ void eeprom_reset() {
   set_data_buf.RT_TD = 10 ; // rap time trig distance(mm) Type:byte
   set_data_buf.RT_IT = 2 ; // rap time invalid time(sec)
   set_data_buf.RT_FF = 10 ; // fft frequency(2-16)
-  set_data_buf.RT_FS = 10; // fft strength（0-20）
+  set_data_buf.RT_FS = 10; // fft strength（0-70）
   eeprom_write(); // EEPROM書き込み
 }
 
@@ -127,7 +124,6 @@ void BtnB_push() {
     draw_trig = 1;
   } else {
     if (BtnB_trig == 1)BtnB_trig = 2;
-
   }
 }
 
@@ -187,7 +183,7 @@ void sample_read(uint8_t read_address, double *sumple_real, double *sumple_imag)
     val1 = Wire1.read();
     val2 = Wire1.read();
 
-    sumple_real[i] = (int16_t)((val1 << 8) | val2 ) * aRes;
+    sumple_real[i] = (int16_t)((val1 << 8) | val2 ) * aRes * acc_coe;
     sumple_imag[i] = 0;
     while (micros() < (microseconds + sampling_period_us)) {
       if ( (microseconds + sampling_period_us) - micros() > 1000000 )break;
@@ -203,9 +199,6 @@ void fft_process(double *sample_real) {
   //double peak = FFT.MajorPeak(vReal_accel_z, SAMPLES, SAMPLING_FREQUENCY);
 
 }
-
-
-
 
 
 //マルチタスク　core0
@@ -296,6 +289,43 @@ void sub_task(void* param) {
       process_time = millis() - time_count ; // 1ループの時間計測
       //Serial.println(end_time);
 
+    } else if (sub_task_status == 12) { // ラップタイム用(fft)
+
+      rap_time_start = 0 ; // スタート時間初期化
+      rap_time_end =  0 ; // ストップ時間初期化
+
+      delay(2000);//スタートボタン押してから待つ時間
+      while (sub_task_status == 2) { // 振動が安定するまで待つモード
+        sample_read(0x3f, vReal_accel_z, vImag_accel_z); //サンプリング
+        fft_process(vReal_accel_z); //FFT解析
+
+
+        set_data_buf.RT_FF = 10 ; // fft frequency(2-16)
+        set_data_buf.RT_FS = 10; // fft strength（0-20）
+
+        if (set_data_buf.RT_FS <= vReal_accel_z[set_data_buf.RT_FF]) { // 振動が設定した値以上なら抜ける
+          sub_task_status = 3; // ループを抜ける為、モードを3にする
+        }
+        delay(1); // wdtリセット用
+      }
+
+      while (sub_task_status == 13 ) { // スタート待ち
+        if ( set_data_buf.RT_FS <= vReal_accel_z[set_data_buf.RT_FF]) { // 振動が設定した値以上ならスタートする
+          rap_time_start = millis(); // スタートの時間を記録する
+          break; // whileを抜ける
+        }
+        delay(1); // wdtリセット用
+      }
+      delay(1000 * set_data_buf.RT_IT); // 即停止しないように待つ
+      while (sub_task_status == 13) { // ストップ待ち
+        if (set_data_buf.RT_FS <= vReal_accel_z[set_data_buf.RT_FF]) { // 振動が設定した値以上ならストップする
+          rap_time_end = millis(); // ストップの時間を記録する
+          break; // whileを抜ける
+        }
+        delay(1); // wdtリセット用
+      }
+      sensor.stopContinuous(); //測定停止
+
     }
     delay(10); // wdtリセット用
 
@@ -338,6 +368,7 @@ void test_tof() {
 
 //テスト用ルーチン(FFT解析とそれにかかる時間の確認用)
 void test_fft() {
+  setCpuFrequencyMhz(240); //周波数変更(低いと読み取り速度が足りない)
   sub_task_status = 11; // サブタスクをテスト用に設定
   M5.Lcd.fillScreen(BLACK);  // 画面をクリア
   while (1) {
@@ -357,23 +388,30 @@ void test_fft() {
     M5.Lcd.print(process_time);
     M5.Lcd.print(F("ms"));
 
-    double vReal_max = 0;
+    //double vReal_max = 0;
     //最大値判定
-    for (int count = 2; count <= 255; count++) {
-      if (vReal_accel_z[count] > vReal_max)vReal_max = vReal_accel_z[count];
-    }
-
-    //M5.Lcd.fillScreen(BLACK);
+    //for (int count = 2; count <= 255; count++) {
+    //  if (vReal_accel_z[count] > vReal_max)vReal_max = vReal_accel_z[count];
+    //}
 
 
-    M5.Lcd.drawLine( 41, 19, 41, 219, BLACK);
-    M5.Lcd.drawLine( 42, 19, 42, 219, BLACK);
 
-    for (int count = 3; count < SAMPLES / 2; count++) {
+    M5.Lcd.drawLine( 5, 76, 5, 5, WHITE); //縦ライン
+    M5.Lcd.drawLine( 5, 76, 160, 76, WHITE); //横ライン
+    M5.Lcd.drawLine( 5, 75 - set_data_buf.RT_FS, 160, 75 - set_data_buf.RT_FS, GREEN); //閾値表示
 
-      M5.Lcd.drawLine( count + 5 , round(70 - vReal_accel_z[count - 1]  ) + 5 , count + 41 , round(70 - vReal_accel_z[count] ) + 5 , YELLOW);
-      M5.Lcd.drawLine( count + 6, 5, count + 6, 75, BLACK);
-      //M5.Lcd.drawPixel( count + 40 , round(200 - vReal[count] * 200 / 4096 ) + 20 , WHITE);
+    for (int count = 2; count < SAMPLES / 2; count++) {
+      int vReal = round(70 - vReal_accel_z[count]) + 5;
+      if (vReal > 70)vReal = 70;
+      for (int i = 0; i < 10; i++) {
+        if (count == set_data_buf.RT_FF) {
+          M5.Lcd.drawLine( (count - 1) * 10 + 5 + i , 75 , (count - 1) * 10 + 5 + i  , vReal , YELLOW);
+        } else {
+          M5.Lcd.drawLine( (count - 1) * 10 + 5 + i , 75 , (count - 1) * 10 + 5 + i  , vReal , GREEN);
+        }
+        M5.Lcd.drawLine( (count - 1) * 10 + 6 + i, 5, (count - 1) * 10 + 6, 75, BLACK);
+        M5.Lcd.drawPixel( (count - 1) * 10 + 6 + i, 75 - set_data_buf.RT_FS, GREEN); //閾値表示
+      }
     }
 
 
@@ -385,6 +423,7 @@ void test_fft() {
     }
     delay(100);
   }
+  setCpuFrequencyMhz(20); //周波数変更(元に戻す)
   sub_task_status = 0; // サブタスクを待機に設定
   M5.Lcd.fillScreen(BLACK);  // 画面をクリア
   menu_lcd_draw(); // メニュー用のlcd表示
@@ -436,7 +475,7 @@ void setting() {
         SerialBT.println(F("RT_TD, rap time trig distance(mm) Type:byte"));
         SerialBT.println(F("RT_IT, rap time invalid time(sec) Type:byte"));
         SerialBT.println(F("RT_FF, fft frequency(2-16)) Type:byte"));
-        SerialBT.println(F("RT_FS, fft strength(0-20) Type:byte"));
+        SerialBT.println(F("RT_FS, fft strength(0-70) Type:byte"));
         SerialBT.println(F("save; Write the setting data to eeprom"));
         SerialBT.println(F("list; List of setting data"));
       } else if (read_serial.equalsIgnoreCase("list") == true) {
@@ -448,7 +487,7 @@ void setting() {
         SerialBT.print(F("RT_TD,")); SerialBT.print(set_data_buf.RT_TD); SerialBT.println(F(";")); // rap time trig distance(mm) Type:byte
         SerialBT.print(F("RT_IT,")); SerialBT.print(set_data_buf.RT_IT); SerialBT.println(F(";")); // rap time invalid time(sec) Type:byte
         SerialBT.print(F("RT_FF,")); SerialBT.print(set_data_buf.RT_FF); SerialBT.println(F(";")); // fft frequency(2-16) Type:byte
-        SerialBT.print(F("RT_FS,")); SerialBT.print(set_data_buf.RT_FS); SerialBT.println(F(";")); // fft strength(0-20) Type:byte
+        SerialBT.print(F("RT_FS,")); SerialBT.print(set_data_buf.RT_FS); SerialBT.println(F(";")); // fft strength(0-70) Type:byte
       } else if (read_serial.equalsIgnoreCase("save") == true) {
         SerialBT.println(F("save;Write the setting data to eeprom"));
         eeprom_write();
@@ -552,7 +591,7 @@ void rap_timer_tof() {
     // 変数初期化(修正)
     rap_time_start = 0;
     rap_time_end = 0;
-
+    setCpuFrequencyMhz(240); //周波数変更(低いと読み取り速度が足りない)
     //センサーの状態チェック
     M5.Lcd.fillScreen(BLACK);  // 画面をクリア
     M5.Lcd.setTextSize(2);          // 文字のサイズ
@@ -604,12 +643,12 @@ void rap_timer_tof() {
         return;
       }
       // 画面更新用
-      rap_time = (millis() - rap_time_start)  ;
-      rap_draw(rap_time);
+      rap_time[0] = (millis() - rap_time_start)  ;
+      rap_draw(rap_time[0]);
     }
     //結果表示
-    rap_time = ( rap_time_end - rap_time_start) ;
-    rap_draw(rap_time);
+    rap_time[0] = ( rap_time_end - rap_time_start) ;
+    rap_draw(rap_time[0]);
 
 
     while (1) {
@@ -632,6 +671,97 @@ void rap_timer_tof() {
     }
   }
 }
+
+
+// ラップタイマー用
+void rap_timer_fft() {
+
+  while (1) {
+    // 変数初期化(修正)
+    rap_time_start = 0;
+    rap_time_end = 0;
+
+    //センサーの状態チェック
+    M5.Lcd.fillScreen(BLACK);  // 画面をクリア
+    M5.Lcd.setTextSize(2);          // 文字のサイズ
+    M5.Lcd.setCursor(10, 15);
+    M5.Lcd.print(F("Waiting"));
+
+    sub_task_status = 12; // サブタスクに距離センサーの変動が落ち着くかの確認をする
+    while (sub_task_status == 12 ) { //サブタスクの準備完了まで待つ
+      //M5.update(); // ボタンの状態を更新
+      //if (M5.BtnB.wasReleased()) { //ボタンを押したら戻る
+      if (BtnA_trig != 0) {
+        BtnA_trig = 0;
+        sub_task_status = 0; // サブタスクを待機にする
+        menu_lcd_draw(); // メニューを表示する
+        return;
+      }
+      power_supply_draw(); // バッテリー表示
+      delay(10);
+    }
+    // スタート待ち
+    M5.Lcd.fillScreen(BLACK);  // 画面をクリア
+    M5.Lcd.setTextSize(2);          // 文字のサイズ
+    M5.Lcd.setCursor(10, 15);
+    M5.Lcd.print(F("Ready..."));
+
+    while (rap_time_start == 0 ) { //スタート時間が更新されたらスタートする
+      //M5.update(); // ボタンの状態を更新
+      //if (M5.BtnB.wasReleased()) { //ボタンを押したら戻る
+      if (BtnA_trig != 0) {
+        BtnA_trig = 0;
+        sub_task_status = 0; // サブタスクを待機にする
+        menu_lcd_draw(); // メニューを表示する
+        return;
+      }
+      power_supply_draw(); // バッテリー表示
+      delay(10);
+    }
+    M5.Lcd.fillScreen(BLACK);  // スタートしたら一回画面をクリアする
+    power_supply_draw(); // バッテリー表示
+    while (rap_time_end == 0 ) { // ラップタイムの終わりが来るまでループする
+
+      //途中で抜ける用
+      // M5.update(); // ボタンの状態を更新
+      //if (M5.BtnB.wasReleased()) { //ボタンを押したら戻る
+      if (BtnA_trig != 0) {
+        BtnA_trig = 0;
+        sub_task_status = 0; // サブタスクを待機にする
+        menu_lcd_draw(); // メニューを表示する
+        return;
+      }
+      // 画面更新用
+      rap_time[0] = (millis() - rap_time_start)  ;
+      rap_draw(rap_time[0]);
+    }
+    //結果表示
+    rap_time[0] = ( rap_time_end - rap_time_start) ;
+    rap_draw(rap_time[0]);
+
+    setCpuFrequencyMhz(20); //周波数変更(元に戻す)
+    while (1) {
+      sleep_start(); //スリープに入る
+      //途中で抜ける用
+      //M5.update(); // ボタンの状態を更新
+      //if (M5.BtnB.wasReleased()) { //Bボタンを押したら戻る
+      if (BtnB_trig != 0) {
+        BtnB_trig = 0;
+        sub_task_status = 0; // サブタスクを待機にする
+        menu_lcd_draw(); // メニューを表示する
+        return;
+      } else if (BtnA_trig != 0) {
+        BtnA_trig = 0;
+        //} else if (M5.BtnA.wasReleased()) { // 再スタート用
+        sub_task_status = 0; // サブタスクを待機にする
+        menu_lcd_draw(); // メニューを表示する
+        break;
+      }
+    }
+  }
+}
+
+
 
 // メニュー表示用
 void menu_lcd_draw() {
@@ -762,10 +892,10 @@ void loop()
     } else if (BtnA_trig != 0) {
       BtnA_trig = 0;
       if (menu_count == 0)rap_timer_tof();
-      //if (menu_count == 1)rap_timer_fft();
+      if (menu_count == 1)rap_timer_fft();
       if (menu_count == 2)setting();
       if (menu_count == 3)test_tof();
-      //if (menu_count == 4)test_fft();
+      if (menu_count == 4)test_fft();
     }
     power_supply_draw();
     delay(10);
