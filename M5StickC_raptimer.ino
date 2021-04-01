@@ -22,7 +22,7 @@ BluetoothSerial SerialBT; // シリアルBT定義
 
 #define sleep_time 5000 //(ms)経過したらsleepする
 #define device_address 0x68 // 加速度センサーのアドレス
-#define acc_coe 1 // 加速度の係数
+#define acc_coe 10 // 加速度の係数
 
 //FFT定義
 arduinoFFT FFT = arduinoFFT();
@@ -299,10 +299,6 @@ void sub_task(void* param) {
         sample_read(0x3f, vReal_accel_z, vImag_accel_z); //サンプリング
         fft_process(vReal_accel_z); //FFT解析
 
-
-        set_data_buf.RT_FF = 10 ; // fft frequency(2-16)
-        set_data_buf.RT_FS = 10; // fft strength（0-20）
-
         if (set_data_buf.RT_FS <= vReal_accel_z[set_data_buf.RT_FF]) { // 振動が設定した値以上なら抜ける
           sub_task_status = 3; // ループを抜ける為、モードを3にする
         }
@@ -373,7 +369,7 @@ void test_fft() {
   M5.Lcd.fillScreen(BLACK);  // 画面をクリア
   while (1) {
     power_supply_draw();
-    M5.Lcd.setTextSize(2);          // 文字のサイズ
+    M5.Lcd.setTextSize(1);          // 文字のサイズ
     //M5.Lcd.setCursor(10, 15);
     //M5.Lcd.print(F("Dist:"));
     //if (distance_read < 1000)M5.Lcd.print(F(" "));
@@ -381,7 +377,7 @@ void test_fft() {
     //if (distance_read < 10)M5.Lcd.print(F(" "));
     //M5.Lcd.print(distance_read);
     //M5.Lcd.print(F("mm"));
-    M5.Lcd.setCursor(10, 15);
+    M5.Lcd.setCursor(0, 0);
     M5.Lcd.print(F("Time:"));
     if (process_time < 100)M5.Lcd.print(F(" "));
     if (process_time < 10)M5.Lcd.print(F(" "));
@@ -404,7 +400,7 @@ void test_fft() {
       int vReal = round(70 - vReal_accel_z[count]) + 5;
       if (vReal > 70)vReal = 70;
       for (int i = 0; i < 10; i++) {
-        if (count == set_data_buf.RT_FF) {
+        if (count != set_data_buf.RT_FF) {
           M5.Lcd.drawLine( (count - 1) * 10 + 5 + i , 75 , (count - 1) * 10 + 5 + i  , vReal , YELLOW);
         } else {
           M5.Lcd.drawLine( (count - 1) * 10 + 5 + i , 75 , (count - 1) * 10 + 5 + i  , vReal , GREEN);
@@ -830,6 +826,11 @@ void setup()
   M5.Lcd.setTextSize(2);          // 文字のサイズ
   M5.Lcd.setTextColor(WHITE, BLACK); // 文字の色
 
+  Wire1.begin(21, 22); // define (SDA,SCL)
+  Wire1.setClock(400000);
+  imu.begin();
+
+  sampling_period_us = round(1000000 * (1.0 / SAMPLING_FREQUENCY));
 
   //マルチタスク用の宣言
   xTaskCreatePinnedToCore(sub_task, "sub_task", 8192, NULL, 1, NULL, 0);
