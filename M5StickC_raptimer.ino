@@ -282,11 +282,12 @@ void sub_task(void* param) {
       sensor.stopContinuous(); //測定停止
 
     } else if (sub_task_status == 11) { // FFT解析モード
-
-      time_count = millis(); // 1ループのタイム計測用
-      sample_read(0x3f, vReal_accel_z, vImag_accel_z); //サンプリング
-      fft_process(vReal_accel_z); //FFT解析
-      process_time = millis() - time_count ; // 1ループの時間計測
+      /*
+            time_count = millis(); // 1ループのタイム計測用
+            sample_read(0x3f, vReal_accel_z, vImag_accel_z); //サンプリング
+            fft_process(vReal_accel_z); //FFT解析
+            process_time = millis() - time_count ; // 1ループの時間計測
+      */
       //Serial.println(end_time);
 
     } else if (sub_task_status == 12) { // ラップタイム用(fft)
@@ -368,6 +369,12 @@ void test_fft() {
   sub_task_status = 11; // サブタスクをテスト用に設定
   M5.Lcd.fillScreen(BLACK);  // 画面をクリア
   while (1) {
+
+      time_count = millis(); // 1ループのタイム計測用
+      sample_read(0x3f, vReal_accel_z, vImag_accel_z); //サンプリング
+      fft_process(vReal_accel_z); //FFT解析
+      process_time = millis() - time_count ; // 1ループの時間計測
+    
     power_supply_draw();
     M5.Lcd.setTextSize(1);          // 文字のサイズ
     //M5.Lcd.setCursor(10, 15);
