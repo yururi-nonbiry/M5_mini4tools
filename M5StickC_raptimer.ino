@@ -3,17 +3,11 @@
 
 // include
 #include <M5StickC.h> // M5stick
-#include <Wire.h> // I2C
-#include <VL53L0X.h> //ToFセンサー
 #include "BluetoothSerial.h" // シリアルBT
 #include <EEPROM.h> // eeprom
 #include "esp_deep_sleep.h" //スリープ用
 #include "esp_sleep.h"
-#include "arduinoFFT.h"
-#include "I2C_MPU6886.h"
 
-//距離センサー定義
-VL53L0X sensor; // 距離センサー定義
 BluetoothSerial SerialBT; // シリアルBT定義
 
 // 各種定数
@@ -21,19 +15,11 @@ BluetoothSerial SerialBT; // シリアルBT定義
 #define BtnB_pin 39
 
 #define sleep_time 5000 //(ms)経過したらsleepする
-#define device_address 0x68 // 加速度センサーのアドレス
-#define acc_coe 10 // 加速度の係数
-
-//FFT定義
-arduinoFFT FFT = arduinoFFT();
-I2C_MPU6886 imu(device_address, Wire1);
-#define SAMPLING_FREQUENCY 4000 //Hz,一軸だけの読み取りなら4kHzまで(読み取りでライブラリは使用しない)
-#define SAMPLES 32 //サンプル数 2の倍数にすること
+#define ir_out 26
+#define ir_in 36
 
 // グローバル変数定義
 // サブタスク用
-volatile byte sub_task_status = 0 ; //サブタスクの処理指示用
-volatile int distance_read ; // 距離読取用
 volatile int process_time = 0 ; // 処理時間
 volatile unsigned long time_count ; // スタート時間記録用
 volatile float read_voltage ;//電圧読取用
@@ -43,26 +29,17 @@ volatile unsigned long rap_time_end ; // ストップ時間記録用
 volatile unsigned long rap_time[10] ; // ラップタイム計算用
 volatile byte raptime_count = 0;
 
-//グローバル変数
-float accel_z = 0.0F;
-float gyro_z = 0.0F;
-
 unsigned int sampling_period_us;
 unsigned long microseconds;
 
-double vReal_accel_z[SAMPLES];
-double vImag_accel_z[SAMPLES];
-
-
-//byte menu_count = 0;
 
 // メインルーチンのメニューカウント用
 byte menu_count = 0 ;
 byte BtnA_trig = 0; //ボタンを押したかの判定用
 byte BtnB_trig = 0; //ボタンを押したかの判定用
-volatile unsigned long BtnA_pushed = 0; //ボタンを押した時間
-volatile unsigned long BtnB_pushed = 0; //ボタンを押した時間
-volatile unsigned long action_time = 0; //ボタンを押した時間
+unsigned long BtnA_pushed = 0; //ボタンを押した時間
+unsigned long BtnB_pushed = 0; //ボタンを押した時間
+unsigned long action_time = 0; //ボタンを押した時間
 byte draw_trig = 1;
 
 // EEPROMの構造体
@@ -96,7 +73,6 @@ void eeprom_write() {
   EEPROM.put <set_data> (0, set_data_buf); // EEPROMへの書き込み
   EEPROM.commit(); // これが必要らしい
 }
-
 
 // 割り込み処理(ボタン関係)
 void BtnA_push() {
@@ -166,271 +142,6 @@ void sleep_start() {
   }
 }
 
-void sample_read(uint8_t read_address, double *sumple_real, double *sumple_imag) {
-  uint8_t val1;
-  uint8_t val2;
-  float aRes = 8.0 / 32768.0;
-  //start_time = micros();
-  //加速度サンプリング
-  for (int i = 0; i < SAMPLES; i++)
-  {
-    microseconds = micros();    //Overflows after around 70 minutes!
-
-    Wire1.beginTransmission(device_address);
-    Wire1.write(0x3f);
-    Wire1.endTransmission();
-    Wire1.requestFrom(device_address, 2);
-    val1 = Wire1.read();
-    val2 = Wire1.read();
-
-    sumple_real[i] = (int16_t)((val1 << 8) | val2 ) * aRes * acc_coe;
-    sumple_imag[i] = 0;
-    while (micros() < (microseconds + sampling_period_us)) {
-      if ( (microseconds + sampling_period_us) - micros() > 1000000 )break;
-    }
-  }
-}
-
-//FFT解析
-void fft_process(double *sample_real) {
-  FFT.Windowing(sample_real, SAMPLES, FFT_WIN_TYP_HAMMING, FFT_FORWARD);
-  FFT.Compute(sample_real, vImag_accel_z, SAMPLES, FFT_FORWARD);
-  FFT.ComplexToMagnitude(sample_real, vImag_accel_z, SAMPLES);
-  //double peak = FFT.MajorPeak(vReal_accel_z, SAMPLES, SAMPLING_FREQUENCY);
-
-}
-
-
-//マルチタスク　core0
-//距離センサ関係
-void sub_task(void* param) {
-
-  sensor.init();
-
-  delay(100);
-  // ここから繰り返し
-  while (1) {
-
-    if (sub_task_status == 0) { //何もしないモード
-
-      delay(100);
-
-    } else if (sub_task_status == 1) { //距離測定モード
-
-      sensor.setTimeout(1000);
-      sensor.startContinuous(0);//連続読み取りモード
-      sensor.setMeasurementTimingBudget(20000);
-      sensor.startContinuous(); //連続読取スタート
-
-      while (sub_task_status == 1) {
-        time_count = millis(); // 1ループのタイム計測用
-        distance_read = sensor.readRangeContinuousMillimeters(); //距離読取(連続測定モード)
-
-        if (sensor.timeoutOccurred()) { //センサータイムアウト時の処理()
-          // ここの処理はしなくても大丈夫
-        }
-        process_time = millis() - time_count ; // 1ループの時間計測
-        delay(5);
-      }
-      sensor.stopContinuous(); //測定停止
-
-    } else if (sub_task_status == 2) { // ラップタイム用
-
-      sensor.setTimeout(1000);
-      sensor.startContinuous(0);//連続読み取りモード
-      sensor.setMeasurementTimingBudget(20000);
-      sensor.startContinuous(); //連続読取スタート
-
-      rap_time_start = 0 ; // スタート時間初期化
-      rap_time_end =  0 ; // ストップ時間初期化
-
-      int distance_average ; // 距離の平均値を入れる変数
-
-      while (sub_task_status == 2) { // センサーの距離が安定するまで待つモード
-        int distance_count[255]; // 距離を格納するための変数
-        int distance_max = 0 ; // 最大値を初期化
-        int distance_min = 5000 ; // 最小値を初期化
-        int distance_read ;
-        for (int count = 0; count < set_data_buf.RT_WC; count++) { // 距離を繰り返し測定する
-          distance_read = sensor.readRangeContinuousMillimeters(); // 距離測定
-          if ( distance_max < distance_read )distance_max = distance_read; // 最大値の更新
-          if ( distance_min > distance_read )distance_min = distance_read; // 最小値の更新
-          delay(5); // wdtリセット用
-        }
-
-        if (distance_max - distance_min < set_data_buf.RT_WD) { // 距離の変動が一定以下なら抜ける
-          distance_average = (distance_max + distance_min ) / 2; //最大値と最小値の中心値を入れる(これが判定の基準値となる)
-          sub_task_status = 3; // ループを抜ける為、モードを3にする
-        }
-      }
-
-      while (sub_task_status == 3 ) { // スタート待ち
-        if ( distance_average - sensor.readRangeContinuousMillimeters() > set_data_buf.RT_TD) { // 基準値から一定の距離近づいたらスタートする
-          rap_time_start = millis(); // スタートの時間を記録する
-          break; // whileを抜ける
-        }
-        delay(5); // wdtリセット用
-      }
-      delay(1000 * set_data_buf.RT_IT); // 即停止しないように待つ
-      while (sub_task_status == 3) { // ストップ待ち
-        if (distance_average - sensor.readRangeContinuousMillimeters() > set_data_buf.RT_TD) { // 基準値から一定の距離近づいたらストップする
-          rap_time_end = millis(); // ストップの時間を記録する
-          break; // whileを抜ける
-        }
-        delay(5); // wdtリセット用
-      }
-      sensor.stopContinuous(); //測定停止
-
-    } else if (sub_task_status == 11) { // FFT解析モード
-      /*
-            time_count = millis(); // 1ループのタイム計測用
-            sample_read(0x3f, vReal_accel_z, vImag_accel_z); //サンプリング
-            fft_process(vReal_accel_z); //FFT解析
-            process_time = millis() - time_count ; // 1ループの時間計測
-      */
-      //Serial.println(end_time);
-
-    } else if (sub_task_status == 12) { // ラップタイム用(fft)
-
-      rap_time_start = 0 ; // スタート時間初期化
-      rap_time_end =  0 ; // ストップ時間初期化
-
-      delay(2000);//スタートボタン押してから待つ時間
-      while (sub_task_status == 2) { // 振動が安定するまで待つモード
-        sample_read(0x3f, vReal_accel_z, vImag_accel_z); //サンプリング
-        fft_process(vReal_accel_z); //FFT解析
-
-        if (set_data_buf.RT_FS <= vReal_accel_z[set_data_buf.RT_FF]) { // 振動が設定した値以上なら抜ける
-          sub_task_status = 3; // ループを抜ける為、モードを3にする
-        }
-        delay(1); // wdtリセット用
-      }
-
-      while (sub_task_status == 13 ) { // スタート待ち
-        if ( set_data_buf.RT_FS <= vReal_accel_z[set_data_buf.RT_FF]) { // 振動が設定した値以上ならスタートする
-          rap_time_start = millis(); // スタートの時間を記録する
-          break; // whileを抜ける
-        }
-        delay(1); // wdtリセット用
-      }
-      delay(1000 * set_data_buf.RT_IT); // 即停止しないように待つ
-      while (sub_task_status == 13) { // ストップ待ち
-        if (set_data_buf.RT_FS <= vReal_accel_z[set_data_buf.RT_FF]) { // 振動が設定した値以上ならストップする
-          rap_time_end = millis(); // ストップの時間を記録する
-          break; // whileを抜ける
-        }
-        delay(1); // wdtリセット用
-      }
-      sensor.stopContinuous(); //測定停止
-
-    }
-    delay(10); // wdtリセット用
-
-
-  }
-}
-
-//テスト用ルーチン(距離の測定とそれにかかる時間の確認用)
-void test_tof() {
-  sub_task_status = 1; // サブタスクをテスト用に設定
-  M5.Lcd.fillScreen(BLACK);  // 画面をクリア
-  while (1) {
-    power_supply_draw();
-    M5.Lcd.setTextSize(2);          // 文字のサイズ
-    M5.Lcd.setCursor(10, 15);
-    M5.Lcd.print(F("Dist:"));
-    if (distance_read < 1000)M5.Lcd.print(F(" "));
-    if (distance_read < 100)M5.Lcd.print(F(" "));
-    if (distance_read < 10)M5.Lcd.print(F(" "));
-    M5.Lcd.print(distance_read);
-    M5.Lcd.print(F("mm"));
-    M5.Lcd.setCursor(10, 35);
-    M5.Lcd.print(F("Time:"));
-    if (process_time < 100)M5.Lcd.print(F(" "));
-    if (process_time < 10)M5.Lcd.print(F(" "));
-    M5.Lcd.print(process_time);
-    M5.Lcd.print(F("ms"));
-    //M5.update(); // ボタンの状態を更新
-    //if (M5.BtnB.wasReleased()) {
-    if (BtnB_trig != 0) {
-      BtnB_trig = 0;
-      break;
-    }
-    delay(100);
-  }
-  sub_task_status = 0; // サブタスクを待機に設定
-  M5.Lcd.fillScreen(BLACK);  // 画面をクリア
-  menu_lcd_draw(); // メニュー用のlcd表示
-}
-
-//テスト用ルーチン(FFT解析とそれにかかる時間の確認用)
-void test_fft() {
-  setCpuFrequencyMhz(240); //周波数変更(低いと読み取り速度が足りない)
-  sub_task_status = 11; // サブタスクをテスト用に設定
-  M5.Lcd.fillScreen(BLACK);  // 画面をクリア
-  while (1) {
-
-      time_count = millis(); // 1ループのタイム計測用
-      sample_read(0x3f, vReal_accel_z, vImag_accel_z); //サンプリング
-      fft_process(vReal_accel_z); //FFT解析
-      process_time = millis() - time_count ; // 1ループの時間計測
-    
-    power_supply_draw();
-    M5.Lcd.setTextSize(1);          // 文字のサイズ
-    //M5.Lcd.setCursor(10, 15);
-    //M5.Lcd.print(F("Dist:"));
-    //if (distance_read < 1000)M5.Lcd.print(F(" "));
-    //if (distance_read < 100)M5.Lcd.print(F(" "));
-    //if (distance_read < 10)M5.Lcd.print(F(" "));
-    //M5.Lcd.print(distance_read);
-    //M5.Lcd.print(F("mm"));
-    M5.Lcd.setCursor(0, 0);
-    M5.Lcd.print(F("Time:"));
-    if (process_time < 100)M5.Lcd.print(F(" "));
-    if (process_time < 10)M5.Lcd.print(F(" "));
-    M5.Lcd.print(process_time);
-    M5.Lcd.print(F("ms"));
-
-    //double vReal_max = 0;
-    //最大値判定
-    //for (int count = 2; count <= 255; count++) {
-    //  if (vReal_accel_z[count] > vReal_max)vReal_max = vReal_accel_z[count];
-    //}
-
-
-
-    M5.Lcd.drawLine( 5, 76, 5, 5, WHITE); //縦ライン
-    M5.Lcd.drawLine( 5, 76, 160, 76, WHITE); //横ライン
-    M5.Lcd.drawLine( 5, 75 - set_data_buf.RT_FS, 160, 75 - set_data_buf.RT_FS, GREEN); //閾値表示
-
-    for (int count = 2; count < SAMPLES / 2; count++) {
-      int vReal = round(70 - vReal_accel_z[count]) + 5;
-      if (vReal > 70)vReal = 70;
-      for (int i = 0; i < 10; i++) {
-        if (count != set_data_buf.RT_FF) {
-          M5.Lcd.drawLine( (count - 1) * 10 + 5 + i , 75 , (count - 1) * 10 + 5 + i  , vReal , YELLOW);
-        } else {
-          M5.Lcd.drawLine( (count - 1) * 10 + 5 + i , 75 , (count - 1) * 10 + 5 + i  , vReal , GREEN);
-        }
-        M5.Lcd.drawLine( (count - 1) * 10 + 6 + i, 5, (count - 1) * 10 + 6, 75, BLACK);
-        M5.Lcd.drawPixel( (count - 1) * 10 + 6 + i, 75 - set_data_buf.RT_FS, GREEN); //閾値表示
-      }
-    }
-
-
-    //M5.update(); // ボタンの状態を更新
-    //if (M5.BtnB.wasReleased()) {
-    if (BtnB_trig != 0) {
-      BtnB_trig = 0;
-      break;
-    }
-    delay(100);
-  }
-  setCpuFrequencyMhz(20); //周波数変更(元に戻す)
-  sub_task_status = 0; // サブタスクを待機に設定
-  M5.Lcd.fillScreen(BLACK);  // 画面をクリア
-  menu_lcd_draw(); // メニュー用のlcd表示
-}
 
 // セッティング用サブルーチン (bluetooth serialで設定値を受信するモード)
 void setting() {
@@ -587,51 +298,87 @@ void rap_draw(unsigned long rap) {
 
 }
 
+void start_trig() {
+  rap_time_start = millis();
+}
+
+void stop_trig() {
+  rap_time_end = millis();
+
+}
+
 // ラップタイマー用
-void rap_timer_tof() {
+void rap_timer() {
+  digitalWrite(ir_out, HIGH); // 赤外線センサーの電源をON
 
   while (1) {
     // 変数初期化(修正)
     rap_time_start = 0;
     rap_time_end = 0;
-    setCpuFrequencyMhz(240); //周波数変更(低いと読み取り速度が足りない)
+    //setCpuFrequencyMhz(240); //周波数変更(低いと読み取り速度が足りない)
     //センサーの状態チェック
     M5.Lcd.fillScreen(BLACK);  // 画面をクリア
     M5.Lcd.setTextSize(2);          // 文字のサイズ
     M5.Lcd.setCursor(10, 15);
     M5.Lcd.print(F("Waiting"));
 
-    sub_task_status = 2; // サブタスクに距離センサーの変動が落ち着くかの確認をする
-    while (sub_task_status == 2 ) { //サブタスクの準備完了まで待つ
-      //M5.update(); // ボタンの状態を更新
-      //if (M5.BtnB.wasReleased()) { //ボタンを押したら戻る
-      if (BtnA_trig != 0) {
+    // 赤外線センサーの状態を確認する
+    byte high_count = 0;
+    byte low_count = 0;
+
+    while (high_count < 100 && low_count < 100 ) {
+      if (digitalRead(ir_in) == HIGH) {
+        high_count ++;
+        low_count = 0;
+      } else {
+        low_count ++;
+        high_count = 0;
+      }
+      if (BtnA_trig != 0) { //ボタンを押したら戻る
+        digitalWrite(ir_out, LOW); // 赤外線センサーの電源をOFF
         BtnA_trig = 0;
-        sub_task_status = 0; // サブタスクを待機にする
         menu_lcd_draw(); // メニューを表示する
         return;
       }
-      power_supply_draw(); // バッテリー表示
       delay(10);
     }
+
+
+
     // スタート待ち
     M5.Lcd.fillScreen(BLACK);  // 画面をクリア
     M5.Lcd.setTextSize(2);          // 文字のサイズ
     M5.Lcd.setCursor(10, 15);
     M5.Lcd.print(F("Ready..."));
+    attachInterrupt(digitalPinToInterrupt(ir_in), start_trig, CHANGE); // ピンが変化したら割り込みを行う
 
     while (rap_time_start == 0 ) { //スタート時間が更新されたらスタートする
-      //M5.update(); // ボタンの状態を更新
-      //if (M5.BtnB.wasReleased()) { //ボタンを押したら戻る
-      if (BtnA_trig != 0) {
-        BtnA_trig = 0;
-        sub_task_status = 0; // サブタスクを待機にする
-        menu_lcd_draw(); // メニューを表示する
-        return;
-      }
+
+
       power_supply_draw(); // バッテリー表示
       delay(10);
     }
+    detachInterrupt(digitalPinToInterrupt(ir_in));
+
+    //M5.Lcd.setTextSize(2);          // 文字のサイズ
+    //M5.Lcd.setCursor(10, 15);
+    //M5.Lcd.print(F("Go!     "));
+    while (rap_time_start + 3000 > millis() ) { // ラップタイムの終わりが来るまでループする
+
+      //途中で抜ける用
+      // M5.update(); // ボタンの状態を更新
+      //if (M5.BtnB.wasReleased()) { //ボタンを押したら戻る
+      if (BtnA_trig != 0) {
+        digitalWrite(ir_out, LOW); // 赤外線センサーの電源をOFF
+        BtnA_trig = 0;
+        menu_lcd_draw(); // メニューを表示する
+        return;
+      }
+      // 画面更新用
+      rap_time[0] = (millis() - rap_time_start)  ;
+      rap_draw(rap_time[0]);
+    }
+    attachInterrupt(digitalPinToInterrupt(ir_in), stop_trig, CHANGE); // ピンが変化したら割り込みを行う
     M5.Lcd.fillScreen(BLACK);  // スタートしたら一回画面をクリアする
     power_supply_draw(); // バッテリー表示
     while (rap_time_end == 0 ) { // ラップタイムの終わりが来るまでループする
@@ -640,8 +387,8 @@ void rap_timer_tof() {
       // M5.update(); // ボタンの状態を更新
       //if (M5.BtnB.wasReleased()) { //ボタンを押したら戻る
       if (BtnA_trig != 0) {
+        digitalWrite(ir_out, LOW); // 赤外線センサーの電源をOFF
         BtnA_trig = 0;
-        sub_task_status = 0; // サブタスクを待機にする
         menu_lcd_draw(); // メニューを表示する
         return;
       }
@@ -649,25 +396,27 @@ void rap_timer_tof() {
       rap_time[0] = (millis() - rap_time_start)  ;
       rap_draw(rap_time[0]);
     }
+    detachInterrupt(digitalPinToInterrupt(ir_in));
     //結果表示
+    digitalWrite(ir_out, LOW); // 赤外線センサーの電源をOFF
     rap_time[0] = ( rap_time_end - rap_time_start) ;
     rap_draw(rap_time[0]);
 
 
     while (1) {
+      digitalWrite(ir_out, LOW); // 赤外線センサーの電源をOFF
       sleep_start(); //スリープに入る
+
       //途中で抜ける用
-      //M5.update(); // ボタンの状態を更新
-      //if (M5.BtnB.wasReleased()) { //Bボタンを押したら戻る
       if (BtnB_trig != 0) {
+        digitalWrite(ir_out, LOW); // 赤外線センサーの電源をOFF
         BtnB_trig = 0;
-        sub_task_status = 0; // サブタスクを待機にする
         menu_lcd_draw(); // メニューを表示する
         return;
       } else if (BtnA_trig != 0) {
         BtnA_trig = 0;
-        //} else if (M5.BtnA.wasReleased()) { // 再スタート用
-        sub_task_status = 0; // サブタスクを待機にする
+        digitalWrite(ir_out, HIGH); // 赤外線センサーの電源をON
+
         menu_lcd_draw(); // メニューを表示する
         break;
       }
@@ -676,95 +425,34 @@ void rap_timer_tof() {
 }
 
 
-// ラップタイマー用
-void rap_timer_fft() {
+// 赤外線センサーのチェック用
+void test() {
+  digitalWrite(ir_out, HIGH); // 赤外線センサーの電源をON
+  M5.Lcd.fillScreen(BLACK);  // 画面をクリア
 
   while (1) {
-    // 変数初期化(修正)
-    rap_time_start = 0;
-    rap_time_end = 0;
 
     //センサーの状態チェック
-    M5.Lcd.fillScreen(BLACK);  // 画面をクリア
     M5.Lcd.setTextSize(2);          // 文字のサイズ
     M5.Lcd.setCursor(10, 15);
-    M5.Lcd.print(F("Waiting"));
-
-    sub_task_status = 12; // サブタスクに距離センサーの変動が落ち着くかの確認をする
-    while (sub_task_status == 12 ) { //サブタスクの準備完了まで待つ
-      //M5.update(); // ボタンの状態を更新
-      //if (M5.BtnB.wasReleased()) { //ボタンを押したら戻る
-      if (BtnA_trig != 0) {
-        BtnA_trig = 0;
-        sub_task_status = 0; // サブタスクを待機にする
-        menu_lcd_draw(); // メニューを表示する
-        return;
-      }
-      power_supply_draw(); // バッテリー表示
-      delay(10);
+    if (digitalRead(ir_in) == HIGH) {
+      M5.Lcd.print(F("HIGH"));
+    } else {
+      M5.Lcd.print(F("LOW "));
     }
-    // スタート待ち
-    M5.Lcd.fillScreen(BLACK);  // 画面をクリア
-    M5.Lcd.setTextSize(2);          // 文字のサイズ
-    M5.Lcd.setCursor(10, 15);
-    M5.Lcd.print(F("Ready..."));
 
-    while (rap_time_start == 0 ) { //スタート時間が更新されたらスタートする
-      //M5.update(); // ボタンの状態を更新
-      //if (M5.BtnB.wasReleased()) { //ボタンを押したら戻る
-      if (BtnA_trig != 0) {
-        BtnA_trig = 0;
-        sub_task_status = 0; // サブタスクを待機にする
-        menu_lcd_draw(); // メニューを表示する
-        return;
-      }
-      power_supply_draw(); // バッテリー表示
-      delay(10);
-    }
-    M5.Lcd.fillScreen(BLACK);  // スタートしたら一回画面をクリアする
     power_supply_draw(); // バッテリー表示
-    while (rap_time_end == 0 ) { // ラップタイムの終わりが来るまでループする
 
-      //途中で抜ける用
-      // M5.update(); // ボタンの状態を更新
-      //if (M5.BtnB.wasReleased()) { //ボタンを押したら戻る
-      if (BtnA_trig != 0) {
-        BtnA_trig = 0;
-        sub_task_status = 0; // サブタスクを待機にする
-        menu_lcd_draw(); // メニューを表示する
-        return;
-      }
-      // 画面更新用
-      rap_time[0] = (millis() - rap_time_start)  ;
-      rap_draw(rap_time[0]);
+    //途中で抜ける用
+    if (BtnA_trig != 0) {
+      //digitalWrite(ir_out, LOW); // 赤外線センサーの電源をOFF
+      BtnA_trig = 0;
+      menu_lcd_draw(); // メニューを表示する
+      return;
     }
-    //結果表示
-    rap_time[0] = ( rap_time_end - rap_time_start) ;
-    rap_draw(rap_time[0]);
-
-    setCpuFrequencyMhz(20); //周波数変更(元に戻す)
-    while (1) {
-      sleep_start(); //スリープに入る
-      //途中で抜ける用
-      //M5.update(); // ボタンの状態を更新
-      //if (M5.BtnB.wasReleased()) { //Bボタンを押したら戻る
-      if (BtnB_trig != 0) {
-        BtnB_trig = 0;
-        sub_task_status = 0; // サブタスクを待機にする
-        menu_lcd_draw(); // メニューを表示する
-        return;
-      } else if (BtnA_trig != 0) {
-        BtnA_trig = 0;
-        //} else if (M5.BtnA.wasReleased()) { // 再スタート用
-        sub_task_status = 0; // サブタスクを待機にする
-        menu_lcd_draw(); // メニューを表示する
-        break;
-      }
-    }
+    delay(10);
   }
 }
-
-
 
 // メニュー表示用
 void menu_lcd_draw() {
@@ -772,11 +460,11 @@ void menu_lcd_draw() {
   power_supply_draw(); // バッテリー表示
   M5.Lcd.setTextSize(2);          // 文字のサイズ
   M5.Lcd.setCursor(10, 15);
-  if (menu_count == 0)M5.Lcd.print(F("Rap Timer_tof"));
-  if (menu_count == 1)M5.Lcd.print(F("Rap Timer_fft"));
+  if (menu_count == 0)M5.Lcd.print(F("Rap Timer"));
+  if (menu_count == 1)M5.Lcd.print(F("test"));
   if (menu_count == 2)M5.Lcd.print(F("Setting"));
-  if (menu_count == 3)M5.Lcd.print(F("Test_tof"));
-  if (menu_count == 4)M5.Lcd.print(F("Test_fft"));
+  // if (menu_count == 3)M5.Lcd.print(F("Test_tof"));
+  // if (menu_count == 4)M5.Lcd.print(F("Test_fft"));
 }
 
 // 電源関係表示(電圧と電流を表示)
@@ -800,14 +488,6 @@ void power_supply_draw() {
 }
 
 
-//セットアップ カスタム
-void setup_c() {
-  //ここにsetupを移行(deep sleep 対応の為)
-
-  //Serial.begin(115200);
-
-}
-
 //セットアップ
 void setup()
 {
@@ -816,6 +496,12 @@ void setup()
   EEPROM.begin(1024); //EEPROM開始(サイズ指定)
   EEPROM.get <set_data>(0, set_data_buf); // EEPROMを読み込む
   setCpuFrequencyMhz(20);//CPU周波数変更
+
+  // ピンモード
+  digitalWrite(ir_out, LOW);
+  pinMode(ir_out, OUTPUT);
+  pinMode(ir_in, INPUT);
+  //digitalWrite(ir_out, HIGH);
 
   // ボタンピン割り込み指示
   pinMode(BtnA_pin, INPUT_PULLUP);
@@ -833,15 +519,6 @@ void setup()
   M5.Lcd.setTextSize(2);          // 文字のサイズ
   M5.Lcd.setTextColor(WHITE, BLACK); // 文字の色
 
-  Wire1.begin(21, 22); // define (SDA,SCL)
-  Wire1.setClock(400000);
-  imu.begin();
-
-  sampling_period_us = round(1000000 * (1.0 / SAMPLING_FREQUENCY));
-
-  //マルチタスク用の宣言
-  xTaskCreatePinnedToCore(sub_task, "sub_task", 8192, NULL, 1, NULL, 0);
-
   //EEPROMリセット
   if (digitalRead(BtnA_pin) == LOW) {
     BtnA_trig = 0;
@@ -858,26 +535,6 @@ void setup()
 //メインルーチン
 void loop()
 {
-  /*
-    //ここでスリープからの復帰なのかの判断をする
-    esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
-    if (cause == ESP_SLEEP_WAKEUP_EXT0) {
-    //トリガーで戻ったときの処理
-    } else if (cause == ESP_SLEEP_WAKEUP_TIMER) {
-    //タイマーで戻ったときの処理
-    } else {
-    //通常起動時の処理
-    setup_c();
-    }
-  */
-  //画面クリア
-  M5.Lcd.setHighlightColor(TFT_BLACK);
-  menu_lcd_draw();
-
-  M5.Lcd.setTextSize(2);          // 文字のサイズ
-  M5.Lcd.setCursor(10, 15);
-  M5.Lcd.print(F("senser connect"));
-
 
   //画面クリア
   M5.Lcd.setHighlightColor(TFT_BLACK);
@@ -891,7 +548,7 @@ void loop()
       BtnB_trig = 0;
       menu_count ++ ;
       //if (menu_count < 2) menu_count ++ ;
-      if (menu_count == 5)menu_count = 0;
+      if (menu_count == 3)menu_count = 0;
       menu_lcd_draw();
     } else if (M5.Axp.GetBtnPress() == 2) {
       if (menu_count > 0) menu_count --;
@@ -899,11 +556,11 @@ void loop()
       //} else if (M5.BtnA.wasReleased()) {
     } else if (BtnA_trig != 0) {
       BtnA_trig = 0;
-      if (menu_count == 0)rap_timer_tof();
-      if (menu_count == 1)rap_timer_fft();
+      if (menu_count == 0)rap_timer();
+      if (menu_count == 1)test();
       if (menu_count == 2)setting();
-      if (menu_count == 3)test_tof();
-      if (menu_count == 4)test_fft();
+      //if (menu_count == 3)test_tof();
+
     }
     power_supply_draw();
     delay(10);
