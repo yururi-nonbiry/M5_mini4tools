@@ -349,6 +349,7 @@ void test() {
 void waveform_display() {
   setCpuFrequencyMhz(240);//CPU周波数変更
   delay(100);
+  fft_dis.ad_calibration();
   while (1) {
 
     //センサーの状態チェック
@@ -377,6 +378,7 @@ void waveform_display() {
 void fft_display() {
   setCpuFrequencyMhz(240);//CPU周波数変更
   delay(100);
+  fft_dis.ad_calibration();
   while (1) {
 
     //センサーの状態チェック
@@ -406,6 +408,7 @@ void fft_display() {
 void analytic_display() {
   setCpuFrequencyMhz(240);//CPU周波数変更
   delay(100);
+  fft_dis.ad_calibration();
   while (1) {
 
     //センサーの状態チェック
@@ -441,8 +444,10 @@ void menu_lcd_draw() {
   if (menu_count == 0)M5.Lcd.print(F("Rap Timer"));
   if (menu_count == 1)M5.Lcd.print(F("test"));
   if (menu_count == 2)M5.Lcd.print(F("Setting"));
-  // if (menu_count == 3)M5.Lcd.print(F("Test_tof"));
-  // if (menu_count == 4)M5.Lcd.print(F("Test_fft"));
+  if (menu_count == 3)M5.Lcd.print(F("waveform_display"));
+  if (menu_count == 4)M5.Lcd.print(F("fft_display"));
+  if (menu_count == 5)M5.Lcd.print(F("analytic_display"));
+  if (menu_count == 6)M5.Lcd.print(F("eeprom_reset"));
 }
 
 // 電源関係表示(電圧と電流を表示)
@@ -498,17 +503,20 @@ void setup()
   M5.Lcd.setTextSize(2);          // 文字のサイズ
   M5.Lcd.setTextColor(WHITE, BLACK); // 文字の色
 
+
+}
+
+void eeprom_reset() {
   //EEPROMリセット
-  if (digitalRead(BtnA_pin) == LOW) {
-    BtnA_trig = 0;
-    //M5.update(); // ボタンの状態を更新
-    //if (M5.BtnA.isPressed() == 1) {
-    M5.Lcd.print(F("EEPROM Reset"));
-    delay(1000);
-    bt_set.eeprom_reset();
-    //eeprom_reset();
-    M5.Lcd.fillScreen(BLACK);   // 画面リセット
-  }
+  BtnA_trig = 0;
+  //M5.update(); // ボタンの状態を更新
+  //if (M5.BtnA.isPressed() == 1) {
+  M5.Lcd.print(F("EEPROM Reset"));
+  delay(1000);
+  bt_set.eeprom_reset();
+  //eeprom_reset();
+  M5.Lcd.fillScreen(BLACK);   // 画面リセット
+  menu_lcd_draw(); // メニューを表示する
 }
 
 //メインルーチン
@@ -526,7 +534,7 @@ void loop()
       BtnB_trig = 0;
       menu_count ++ ;
       //if (menu_count < 2) menu_count ++ ;
-      if (menu_count == 3)menu_count = 0;
+      if (menu_count == 7)menu_count = 0;
       menu_lcd_draw();
     } else if (M5.Axp.GetBtnPress() == 2) {
       if (menu_count > 0) menu_count --;
@@ -540,6 +548,7 @@ void loop()
       if (menu_count == 3)waveform_display();
       if (menu_count == 4)fft_display();
       if (menu_count == 5)analytic_display();
+      if (menu_count == 6)eeprom_reset();
 
     }
     power_supply_draw();
@@ -547,4 +556,3 @@ void loop()
     sleep_start(); //スリープに入る
   }
 }
-
