@@ -365,7 +365,7 @@ void waveform_display() {
       digitalWrite(ir_out, LOW); // 赤外線センサーの電源をOFF
       BtnA_trig = 0;
       menu_lcd_draw(); // メニューを表示する
-      return;
+      break;
     }
     delay(10);
   }
@@ -395,7 +395,7 @@ void fft_display() {
       digitalWrite(ir_out, LOW); // 赤外線センサーの電源をOFF
       BtnA_trig = 0;
       menu_lcd_draw(); // メニューを表示する
-      return;
+      break;
     }
     delay(10);
   }
@@ -415,8 +415,6 @@ void analytic_display() {
     M5.Lcd.setTextSize(2);          // 文字のサイズ
     M5.Lcd.setCursor(10, 15);
 
-    //fft_dis.ad_conversion();
-    //fft_dis.fft_processing();
     fft_dis.fft_drawing();
 
     power_supply_draw(); // バッテリー表示
@@ -426,7 +424,7 @@ void analytic_display() {
       digitalWrite(ir_out, LOW); // 赤外線センサーの電源をOFF
       BtnA_trig = 0;
       menu_lcd_draw(); // メニューを表示する
-      return;
+      break;
     }
     delay(10);
   }
@@ -457,7 +455,7 @@ void binary_send() {
       digitalWrite(ir_out, LOW); // 赤外線センサーの電源をOFF
       BtnA_trig = 0;
       menu_lcd_draw(); // メニューを表示する
-      return;
+      break;
     }
     delay(10);
   }
@@ -504,34 +502,43 @@ void power_supply_draw() {
 //セットアップ
 void setup()
 {
+  M5.begin();
   //Wire.begin(); //i2cスタート
 
-  fft_dis.begin();
-  bt_set.eeprom_begin();
   Serial.begin(115200);
+  //Serial.print("test");
+  fft_dis.begin();
+  //Serial.print("test1");
+  bt_set.eeprom_begin();
+  //Serial.print("test2");
   setCpuFrequencyMhz(20);//CPU周波数変更
+  //delay(10);
 
   // ピンモード
   digitalWrite(ir_out, LOW);
   pinMode(ir_out, OUTPUT);
   pinMode(ir_in, INPUT);
-  //digitalWrite(ir_out, HIGH);
+  digitalWrite(ir_out, HIGH);
 
   // ボタンピン割り込み指示
   pinMode(BtnA_pin, INPUT_PULLUP);
   pinMode(BtnB_pin, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(BtnA_pin), BtnA_push, CHANGE);
   attachInterrupt(digitalPinToInterrupt(BtnB_pin), BtnB_push, CHANGE);
+  //delay(10);
+  //Serial.print("test3");
 
   //画面は初期化されているのでこっち
   //画面初期化
-  M5.begin();
+  //M5.begin();
   M5.Axp.ScreenBreath(8);         // バックライトの明るさ(7-15)
   M5.Lcd.setRotation(1);          // 表示の向き
   M5.Lcd.fillScreen(BLACK);   //LCD背景色
   M5.Lcd.setTextFont(1);
   M5.Lcd.setTextSize(2);          // 文字のサイズ
   M5.Lcd.setTextColor(WHITE, BLACK); // 文字の色
+  M5.Lcd.setCursor(10, 5);
+  M5.Lcd.print(F("Booting"));
 
 
 }

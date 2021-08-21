@@ -10,7 +10,8 @@
 #define SAMPLES_MAX 2048 // 2のn乗にする
 //#define sampling_frequency 50000 // Hz ADCの速度による max50000Hz
 
-#define analog_pin 32 // 電圧読み取り用のピン
+//#define analog_pin 32 // 電圧読み取り用のピン
+#define analog_pin 36 // 電圧読み取り用のピン
 
 class FFT_display {
   public:
