@@ -14,6 +14,7 @@ FFT_display::FFT_display() {
 void FFT_display::begin() {
   // FFT用
   // Serial.begin(115200);
+  pinMode(analog_pin,ANALOG);
   analogReadResolution(12); // ADCを12bitに設定
   analogSetAttenuation(ADC_11db); // ADCの全チャンネルを -11dBに設定(アッテネータ)
   //sampling_period_us = round(1000000 * (1.0 / sampling_frequency)); // サンプリング1回あたりの時間
@@ -23,16 +24,21 @@ void FFT_display::begin() {
 void FFT_display::ad_conversion() {
   sampling_period_us = round(1000000 * (1.0 / sampling_frequency)); // サンプリング1回あたりの時間
   double vReal_ave = 0;
+ //Serial.println(millis());
   for (int i = 0; i < samples; i++)
   {
+    //Serial.println(millis());
     microseconds = micros();    //Overflows after around 70 minutes! 70分でオーバーフローする
 
     vReal[i] = analogRead(analog_pin); //38 = analog4
     vImag[i] = 0;
-
+    //Serial.println(millis());
     while (micros() < (microseconds + sampling_period_us)) {
     }
+    
+
   }
+  //Serial.println(millis());
   //　adの平均値を求める
   for (int count = 0; count < samples; count++) {
     vReal_ave += vReal[count];
@@ -214,6 +220,7 @@ void FFT_display::binary_send(){
 }
 
 void FFT_display::ad_calibration() {
+  //Serial.println(millis());
 
   // 電流の変転設定用
   M5.Lcd.fillScreen(TFT_BLACK);   //LCD背景色
@@ -222,10 +229,12 @@ void FFT_display::ad_calibration() {
   M5.Lcd.setCursor(0, 0);
   M5.Lcd.print(F("Calibration"));
   delay(1000); // A/D変換が落ち着くまで待つ
+  //Serial.println(millis());
   samples = 2048 ; //サンプル数
   sampling_frequency = 10000 ; //サンプリング周期
   //sampling_period_us = round(1000000 * (1.0 / sampling_frequency)); // サンプリング1回あたりの時間
   ad_conversion(); // A/D読み取り
   ad_origin = ad_ave; //AD変換平均を原点にする
+  //Serial.println(millis());
 
 }
