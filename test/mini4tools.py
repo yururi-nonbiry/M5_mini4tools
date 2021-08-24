@@ -52,7 +52,7 @@ class root():
         self.calibration_label_text.set("未完了")
         self.calibration_label = tkinter.Label(self.root, textvariable=self.calibration_label_text)
         self.calibration_label.place(x=100, y=300)
-        self.calibration_label.pack()
+
 
         #コンフィグ読取
         self.config_read()
