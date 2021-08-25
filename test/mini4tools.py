@@ -4,9 +4,14 @@ import serial
 import configparser
 import time
 import matplotlib.pyplot as plt
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 import tkinter
+import tkinter.ttk as ttk
 import threading
+import sys
+
+
+#from matplotlib.figure import Figure
 
 config_pass = "./config.ini"
 
@@ -50,10 +55,23 @@ class root():
         #self.buttonB.pack(side=tkinter.RIGHT)
 
         # テキスト表示(静的)
-        self.calibration_info = tkinter.Label(self.root, text=u'シリアル接続')
-        self.calibration_info.place(x=10, y=0)
+        self.serial_info = tkinter.Label(self.root, text=u'シリアル接続')
+        self.serial_info.place(x=10, y=0)
+
         self.calibration_info = tkinter.Label(self.root, text=u'キャリブレーション')
         self.calibration_info.place(x=10, y=30)
+
+        self.current_info = tkinter.Label(self.root, text=u'電流(A)', font=('','16'))
+        self.current_info.place(x=10, y=80)
+
+        self.rpm_info = tkinter.Label(self.root, text=u'回転数(RPM)', font=('','16'))
+        self.rpm_info.place(x=10, y=110)
+
+        self.trig_info = tkinter.Label(self.root, text=u'トリガ', font=('','16'))
+        self.trig_info.place(x=400, y=80)
+
+        self.trig_mode_info = tkinter.Label(self.root, text=u'種類', font=('','16'))
+        self.trig_mode_info.place(x=400, y=110)
 
         # テキスト表示(動的)
         self.calibration_label_text = tkinter.StringVar()
@@ -61,34 +79,74 @@ class root():
         self.calibration_label = tkinter.Label(self.root, textvariable=self.calibration_label_text)
         self.calibration_label.place(x=300, y=30)
 
-        # グラフ表示
+        """
+                self.calibration_label_text = tkinter.StringVar()
+                self.calibration_label_text.set("-")
+                self.calibration_label = tkinter.Label(self.root, textvariable=self.calibration_label_text)
+                self.calibration_label.place(x=300, y=30)
 
+                self.calibration_label_text = tkinter.StringVar()
+                self.calibration_label_text.set("-")
+                self.calibration_label = tkinter.Label(self.root, textvariable=self.calibration_label_text)
+                self.calibration_label.place(x=300, y=30)
+        """
+        # 入力欄
+        self.current_entry = tkinter.Entry(self.root,text="",width=10, font=('','16'),justify=tkinter.RIGHT)
+        self.current_entry.place(x=200, y=80)
+        self.current_entry.configure(state='normal')
+        self.current_entry.delete(0,tkinter.END)
+        self.current_entry.insert('end','-')
+        self.current_entry.configure(state='readonly')
+
+        self.rpm_entry = tkinter.Entry(self.root,text="",width=10, font=('','16'),justify=tkinter.RIGHT)
+        self.rpm_entry.place(x=200, y=110)
+        self.rpm_entry.configure(state='normal')
+        self.rpm_entry.delete(0,tkinter.END)
+        self.rpm_entry.insert('end','-')
+        self.rpm_entry.configure(state='readonly')
+
+        self.rpm_entry = tkinter.Entry(self.root,text="",width=10, font=('','16'),justify=tkinter.RIGHT)
+        self.rpm_entry.place(x=500, y=80)
+        self.rpm_entry.configure(state='normal')
+        self.rpm_entry.delete(0,tkinter.END)
+        self.rpm_entry.insert('end','0')
+
+        #コンボボックス
+        self.trig_mode_list = ('両方','立上り','立下り')
+        self.trig_mode_combo = ttk.Combobox(self.root, height=3,width=10, font=('','16'),state="readonly",values=self.trig_mode_list)
+        #self.rpm_entry.insert()
+        self.trig_mode_combo.place(x=500, y=110)
+ 
+    
+        
+        
+        # グラフ表示
         x1 = np.linspace(0.0, 5.0)
         y1 = np.cos(2 * np.pi * x1) * np.exp(-x1)
         x2 = np.linspace(0.0, 3.0)
         y2 = np.cos(2 * np.pi * x2) * np.exp(-x1)
 
-        self.fig = plt.figure()
+        self.fig = plt.figure(figsize=(8,6),dpi=100)
         # ax1
-        ax1 = self.fig.add_subplot(221)
-        ax1.plot(x1, y1)
+        ax1 = self.fig.add_subplot(2,2,1)
+        #ax1.plot(x1, y1)
         ax1.set_title('line plot')
         ax1.set_ylabel('Damped oscillation')
 
         # ax2
-        ax2 = self.fig.add_subplot(222)
-        ax2.scatter(x1, y1, marker='o')
+        ax2 = self.fig.add_subplot(2,2,2)
+        #ax2.scatter(x1, y1, marker='o')
         ax2.set_title('Scatter plot')
 
         # ax3
-        ax3 = self.fig.add_subplot(223)
-        ax3.plot(x2, y2)
+        ax3 = self.fig.add_subplot(2,2,3)
+        #ax3.plot(x2, y2)
         ax3.set_ylabel('Damped oscillation')
         ax3.set_xlabel('time (s)')
 
         # ax4
-        ax4 = self.fig.add_subplot(224)
-        ax4.scatter(x2, y2, marker='o')
+        ax4 = self.fig.add_subplot(2,2,4)
+        #ax4.scatter(x2, y2, marker='o')
         ax4.set_xlabel('time (s)')
         #self.fig, ax_current = plt.subplots(1, 1)
         #plt.plot(buf)
@@ -97,13 +155,25 @@ class root():
         #line.remove()
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.root)  # Generate canvas instance, Embedding fig in root
         self.canvas.draw()
-        self.canvas.get_tk_widget().pack()
+        self.canvas.get_tk_widget().place(x=0, y=150)
+
+        #ツールバーを表示
+        self.toolbar=NavigationToolbar2Tk(self.canvas, self.root)
+        self.toolbar.place(x=10, y=750)
 
         #コンフィグ読取
         self.config_read()
 
+        # ウインドウを閉じたときの処理
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
         # Gui起動
         self.root.mainloop()
+
+    # ウインドウが閉じたらプログラムも終了する
+    def on_closing(self):
+        self.root.destroy() # 画面を閉じる
+        sys.exit(0) # プログラム自体を終了する
 
     def changeText(self):
         self.text.set("Updated Text")
@@ -116,15 +186,17 @@ class root():
     # シリアルの接続と切断
     def serial_start(self,event):
 
+        # 別スレッドを立ててシリアル通信を実行する
         if self.serial_valid == 0 :
 
-            self.serial_valid = 1 # シリアル通信継続用
+            self.serial_valid = 1 # シリアル通信 継続用
             self.connect_bt_text.set("切断")
             self.serial_thread = threading.Thread(target=self.serial_read)
             self.serial_thread.start()
 
+        # 別スレッドのシリアル通信を終了する
         else:
-            self.serial_valid = 0 # シリアル通信継続用
+            self.serial_valid = 0 # シリアル通信 切断用
             self.connect_bt_text.set("接続")
 
     def culc(self,buf):
